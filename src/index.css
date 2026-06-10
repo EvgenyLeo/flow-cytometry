@@ -1,6 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600&family=Orbitron:wght@400;500;600&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 
+body {
+  font-family: 'Space Grotesk', sans-serif;
+}
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -148,5 +152,37 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+ 
+}
+@keyframes floatHero {
+  0% {
+    transform: scale(1.035) translateY(0px);
+  }
+  50% {
+    transform: scale(1.05) translateY(-8px);
+  }
+  100% {
+    transform: scale(1.035) translateY(0px);
+  }
+
+}
+@keyframes cellFlow {
+  0% {
+    transform: translateY(-40px);
+    opacity: 0;
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  90% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(420px);
+    opacity: 0;
   }
 }
