@@ -13,21 +13,29 @@ const CH_HALF = 22
 const LASER_Y  = 340
 const LASER_X0 = 50
 const LASER_X1 = LASER_X0 + 76
-const FSC_BEAM_STOP_X = 558
-const LASER_X_END = FSC_BEAM_STOP_X
+
+const INT_X = CH_CX
+const INT_Y = LASER_Y
 
 const FSC_LENS_X = 618
 const FSC_LENS_Y = LASER_Y
 const FSC_DET_X  = 712
 const FSC_DET_Y  = LASER_Y
+const LASER_X_END = FSC_LENS_X - 34
 
-const SSC_LENS_X = 276
-const SSC_LENS_Y = 128
-const SSC_DET_X  = 192
-const SSC_DET_Y  = 98
+const SSC_ANGLE = (52 * Math.PI) / 180
+const SSC_LENS_DIST = 128
+const SSC_DET_OFFSET = 82
+const SSC_LENS_X = INT_X + Math.cos(SSC_ANGLE) * SSC_LENS_DIST
+const SSC_LENS_Y = INT_Y + Math.sin(SSC_ANGLE) * SSC_LENS_DIST
+const SSC_DET_X  = SSC_LENS_X + Math.cos(SSC_ANGLE) * SSC_DET_OFFSET
+const SSC_DET_Y  = SSC_LENS_Y + Math.sin(SSC_ANGLE) * SSC_DET_OFFSET
 
-const INT_X = CH_CX
-const INT_Y = LASER_Y
+const LENS_R = 16
+const DETECTOR_APERTURE_R = 5
+const DETECTOR_BODY_R = 14
+const DETECTOR_MODULE_W = 76
+const DETECTOR_MODULE_H = 52
 
 let _id = 0
 const mkid = () => ++_id
@@ -107,6 +115,7 @@ interface Photon {
   x: number; y: number
   vx: number; vy: number
   kind: "fsc" | "ssc"
+  phase: "scatter" | "focus"
   opacity: number; age: number; maxAge: number
 }
 
@@ -162,12 +171,6 @@ function Defs() {
         <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
       </filter>
 
-      {/* Beam stop */}
-      <filter id="glow-beam-stop" x="-80%" y="-80%" width="260%" height="260%">
-        <feGaussianBlur stdDeviation="8" result="b"/>
-        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>
-
       {/* Channel fill */}
       <linearGradient id="ch-fill" x1="0%" y1="0%" x2="100%" y2="0%">
         <stop offset="0%"   stopColor="#0a1f35" stopOpacity="0.95"/>
@@ -208,34 +211,38 @@ function Defs() {
         <stop offset="100%" stopColor="#052d54" stopOpacity="0.2"/>
       </radialGradient>
 
-      {/* Collection lens glass */}
-      <radialGradient id="lens-glass" cx="38%" cy="32%" r="68%">
-        <stop offset="0%"   stopColor="#e8f4fc" stopOpacity="0.95"/>
-        <stop offset="42%"  stopColor="#8ab4cc" stopOpacity="0.55"/>
-        <stop offset="100%" stopColor="#1a3048" stopOpacity="0.18"/>
+      <linearGradient id="det-body-g" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stopColor="#102436"/>
+        <stop offset="42%" stopColor="#07111a"/>
+        <stop offset="100%" stopColor="#101923"/>
+      </linearGradient>
+
+      {/* Detector aperture glow */}
+      <radialGradient id="det-aperture-g" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"   stopColor="#a8f0ff" stopOpacity="0.75"/>
+        <stop offset="55%"  stopColor="#22d3ee" stopOpacity="0.28"/>
+        <stop offset="100%" stopColor="#0e7490" stopOpacity="0.04"/>
       </radialGradient>
 
-      {/* Detector sensor windows */}
-      <radialGradient id="det-fsc-g" cx="50%" cy="50%" r="50%">
-        <stop offset="0%"   stopColor="#6ef2a8" stopOpacity="0.9"/>
-        <stop offset="60%"  stopColor="#10b981" stopOpacity="0.45"/>
-        <stop offset="100%" stopColor="#065f46" stopOpacity="0.06"/>
+      {/* Photon cores */}
+      <radialGradient id="ph-scatter-g" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"   stopColor="#c8f8ff" stopOpacity="1"/>
+        <stop offset="100%" stopColor="#22d3ee" stopOpacity="0"/>
       </radialGradient>
-      <radialGradient id="det-ssc-g" cx="50%" cy="50%" r="50%">
-        <stop offset="0%"   stopColor="#fde789" stopOpacity="0.9"/>
-        <stop offset="60%"  stopColor="#f59e0b" stopOpacity="0.45"/>
-        <stop offset="100%" stopColor="#92400e" stopOpacity="0.06"/>
+      <radialGradient id="ph-focus-g" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"   stopColor="#e8fcff" stopOpacity="1"/>
+        <stop offset="100%" stopColor="#67e8f9" stopOpacity="0"/>
       </radialGradient>
 
-      {/* Photon signal cores */}
-      <radialGradient id="ph-fsc-g" cx="50%" cy="50%" r="50%">
-        <stop offset="0%"   stopColor="#b8ffd4" stopOpacity="1"/>
-        <stop offset="100%" stopColor="#10b981" stopOpacity="0"/>
-      </radialGradient>
-      <radialGradient id="ph-ssc-g" cx="50%" cy="50%" r="50%">
-        <stop offset="0%"   stopColor="#fff0b8" stopOpacity="1"/>
-        <stop offset="100%" stopColor="#f59e0b" stopOpacity="0"/>
-      </radialGradient>
+      <filter id="glow-cyan" x="-120%" y="-120%" width="340%" height="340%">
+        <feGaussianBlur stdDeviation="4" result="b1"/>
+        <feGaussianBlur stdDeviation="9" result="b2"/>
+        <feMerge>
+          <feMergeNode in="b2"/>
+          <feMergeNode in="b1"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
 
       {/* Clip path for cells */}
       <clipPath id="channel-clip">
@@ -421,189 +428,101 @@ function LaserSource({ enabled }: { enabled: boolean }) {
   )
 }
 
-/** Shared collection lens — faces toward (fx, fy) from lens center (lx, ly). */
-function CollectionLens({
-  lx, ly, fx, fy, enabled, tint,
+/** Shared compact detector module matching the laser source visual language. */
+function OpticalDetectorModule({
+  lensX, lensY, detX, detY, enabled,
 }: {
-  lx: number; ly: number; fx: number; fy: number
-  enabled: boolean; tint: "fsc" | "ssc"
+  lensX: number; lensY: number; detX: number; detY: number; enabled: boolean
 }) {
-  const ang = Math.atan2(fy - ly, fx - lx) * (180 / Math.PI)
-  const accent = tint === "fsc" ? "#10b981" : "#f59e0b"
-  return (
-    <g transform={`translate(${lx},${ly}) rotate(${ang})`}>
-      {/* lens barrel */}
-      <rect x={-5} y={-22} width={10} height={44} rx="2"
-        fill="#0a1520" stroke={enabled ? "#2a4a62" : "#141f2a"} strokeWidth="1.2"/>
-      <rect x={-3.5} y={-19} width={7} height={38} rx="1"
-        fill="#0d1a28" stroke="#1a3048" strokeWidth="0.6"/>
-      {/* biconvex element */}
-      <ellipse cx={0} cy={0} rx={5.5} ry={20}
-        fill={enabled ? "url(#lens-glass)" : "#0f1a24"}
-        stroke={enabled ? "#6a9ab8" : "#1a2838"} strokeWidth="0.9" opacity={enabled ? 0.92 : 0.35}/>
-      <ellipse cx={-1.2} cy={-5} rx={2.2} ry={7}
-        fill="#ffffff" opacity={enabled ? 0.22 : 0.06}/>
-      {/* tint ring — channel accent */}
-      <ellipse cx={0} cy={0} rx={5.5} ry={20}
-        fill="none" stroke={enabled ? accent : "#1a2838"}
-        strokeWidth="0.45" opacity={enabled ? 0.35 : 0.15}/>
-    </g>
-  )
-}
-
-/** Shared PMT-style detector housing — window faces (fx, fy). */
-function DetectorHousing({
-  dx, dy, fx, fy, enabled, tint,
-}: {
-  dx: number; dy: number; fx: number; fy: number
-  enabled: boolean; tint: "fsc" | "ssc"
-}) {
-  const ang = Math.atan2(fy - dy, fx - dx) * (180 / Math.PI)
-  const accent = tint === "fsc" ? "#10b981" : "#f59e0b"
-  const bright = tint === "fsc" ? "#5fee9a" : "#fde789"
-  const windowGrad = tint === "fsc" ? "url(#det-fsc-g)" : "url(#det-ssc-g)"
+  const ang = Math.atan2(detY - lensY, detX - lensX) * (180 / Math.PI)
+  const w = DETECTOR_MODULE_W
+  const h = DETECTOR_MODULE_H
+  const c = enabled ? "#1aa6c9" : "#0f1f35"
+  const opacity = enabled ? 1 : 0.24
 
   return (
-    <g transform={`translate(${dx},${dy}) rotate(${ang})`} opacity={enabled ? 1 : 0.28}>
-      {/* bench rail mount */}
-      <rect x={-6} y={-30} width={12} height={60} rx="2"
-        fill="#080f18" stroke="#1a3048" strokeWidth="1"/>
-      {/* main body */}
-      <rect x={4} y={-26} width={46} height={52} rx="5"
-        fill="#060d16" stroke={enabled ? accent : "#1a2838"} strokeWidth={enabled ? 1.6 : 1}/>
-      <rect x={7} y={-23} width={40} height={46} rx="3"
-        fill="#0a121c" stroke="#152030" strokeWidth="0.6"/>
-      {/* sensor window */}
-      <rect x={2} y={-14} width={6} height={28} rx="2"
-        fill={enabled ? windowGrad : "#0a1210"}
-        stroke={enabled ? bright : "#1a2838"} strokeWidth="0.8" opacity={enabled ? 0.9 : 0.4}/>
-      {/* photocathode ring */}
-      <ellipse cx={5} cy={0} rx={2.5} ry={12}
-        fill="none" stroke={enabled ? bright : "#1a2838"} strokeWidth="0.5" opacity={0.4}/>
-      {/* rear connector */}
-      <rect x={48} y={-5} width={10} height={10} rx="2"
-        fill="#0d1a28" stroke="#2a4055" strokeWidth="1"/>
-      <circle cx={56} cy={0} r={3.5}
-        fill="#111c28" stroke="#3a5068" strokeWidth="1"/>
-      {/* status LED */}
-      <circle cx={42} cy={-18} r={2.8}
-        fill={enabled ? bright : "#0f1a24"}
-        opacity={enabled ? 0.95 : 0.3}/>
+    <g transform={`translate(${detX},${detY}) rotate(${ang})`} opacity={opacity}>
       {enabled && (
-        <circle cx={42} cy={-18} r={5} fill={bright} opacity="0.1"/>
+        <rect x={-9} y={-h / 2 - 5} width={w + 16} height={h + 10} rx="10"
+          fill="#0a3a99" opacity="0.11" filter="url(#glow-det)"/>
       )}
-    </g>
-  )
-}
 
-/** Optical tube segment between two points. */
-function OpticalTube({
-  x1, y1, x2, y2, enabled,
-}: { x1: number; y1: number; x2: number; y2: number; enabled: boolean }) {
-  const mx = (x1 + x2) / 2
-  const my = (y1 + y2) / 2
-  const len = Math.hypot(x2 - x1, y2 - y1)
-  const ang = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI)
-  return (
-    <g transform={`translate(${mx},${my}) rotate(${ang})`} opacity={enabled ? 0.55 : 0.2}>
-      <rect x={-len / 2} y={-5} width={len} height={10} rx="2"
-        fill="#060d14" stroke="#1a3048" strokeWidth="0.8"/>
-      <line x1={-len / 2 + 4} y1={0} x2={len / 2 - 4} y2={0}
-        stroke="#2a4a62" strokeWidth="0.5" strokeDasharray="3 4" opacity="0.5"/>
-    </g>
-  )
-}
-
-function BeamStopDisc({ x, y, enabled }: { x: number; y: number; enabled: boolean }) {
-  return (
-    <g opacity={enabled ? 1 : 0.3}>
-      {/* pedestal mount */}
-      <rect x={x - 4} y={y + 2} width={8} height={38} rx="2"
-        fill="#0a1520" stroke="#2a4a62" strokeWidth="1.2"/>
-      <ellipse cx={x} cy={y + 42} rx={14} ry={4}
-        fill="#060d14" stroke="#1a3048" strokeWidth="1"/>
-
-      {/* obstruction disc — on laser axis, face-on to beam */}
-      <circle cx={x} cy={y} r={17}
-        fill="#030608" stroke="#1e3040" strokeWidth="2"/>
-      <circle cx={x} cy={y} r={15.5}
-        fill="#000000" opacity="0.97"/>
-      {/* matte absorptive surface */}
-      {[0, 45, 90, 135].map(deg => {
-        const rad = (deg * Math.PI) / 180
-        return (
-          <line key={deg}
-            x1={x + Math.cos(rad) * 4} y1={y + Math.sin(rad) * 4}
-            x2={x + Math.cos(rad) * 14} y2={y + Math.sin(rad) * 14}
-            stroke="#0a1820" strokeWidth="1.1" opacity="0.7"/>
-        )
-      })}
-      <circle cx={x} cy={y} r={16.2}
-        fill="none" stroke="#253848" strokeWidth="0.7" opacity="0.5"/>
-      {/* center pin — beam termination point */}
-      <circle cx={x} cy={y} r={2.2} fill="#1a2838" stroke="#304858" strokeWidth="0.5"/>
-
-      {/* shadow wedge below — shows beam blocked */}
+      {/* Housing mirrors the laser source: compact body with an angled rear cap. */}
       <path
-        d={`M ${x - 20} ${y + 1} L ${x + 20} ${y + 1} L ${x + 28} ${y + 18} L ${x - 28} ${y + 18} Z`}
-        fill="#020508" opacity="0.35"/>
+        d={`M 0 ${-h / 2 + 7}
+            Q 0 ${-h / 2 + 1} 8 ${-h / 2 + 1}
+            L ${w - 10} ${-h / 2 - 6}
+            L ${w} ${-h / 2 + 13}
+            L ${w - 8} ${h / 2 - 4}
+            L 8 ${h / 2 + 3}
+            Q 0 ${h / 2 - 1} 0 ${h / 2 - 9} Z`}
+        fill="url(#det-body-g)"
+        stroke={c}
+        strokeWidth={enabled ? 1.7 : 1.1}
+      />
+
+      <path
+        d={`M 13 ${-h / 2 + 9}
+            L ${w - 17} ${-h / 2 + 4}
+            L ${w - 22} ${h / 2 - 10}
+            L 13 ${h / 2 - 6} Z`}
+        fill="#07121d"
+        stroke="#183248"
+        strokeWidth="0.6"
+        opacity="0.74"
+      />
+
+      {/* Front aperture: photons enter here and disappear inside the body. */}
+      <g filter={enabled ? "url(#glow-cyan)" : undefined}>
+        <ellipse cx={0} cy={0} rx={DETECTOR_APERTURE_R + 2.5} ry={15}
+          fill={enabled ? "url(#det-aperture-g)" : "#0f1f35"}
+          stroke={enabled ? "#9beeff" : "#1a3048"}
+          strokeWidth="0.8"
+          opacity={enabled ? 0.95 : 0.32}/>
+        <ellipse cx={0} cy={0} rx={DETECTOR_APERTURE_R - 0.8} ry={10.5}
+          fill="#02070c"
+          opacity={enabled ? 0.54 : 0.35}/>
+        <ellipse cx={-0.4} cy={-3.4} rx={2.4} ry={4.8}
+          fill="#e0f2ff"
+          opacity={enabled ? 0.32 : 0.08}/>
+      </g>
+
+      {/* Minimal internal details, like the laser source LEDs but quieter. */}
+      {[0, 1, 2].map(i => (
+        <circle key={i} cx={22 + i * 12} cy={h / 2 - 13} r={2.2}
+          fill={enabled ? "#4fa3ff" : "#0a1f35"}
+          opacity={enabled ? 0.78 : 0.28}
+          filter={enabled ? "url(#glow-laser)" : undefined}/>
+      ))}
+
+      <line x1={18} y1={-h / 2 + 13} x2={w - 24} y2={-h / 2 + 8}
+        stroke="#8eddf7" strokeWidth="0.55" opacity={enabled ? 0.18 : 0.05}/>
+      <path
+        d={`M ${w - 13} ${-h / 2 + 13} L ${w - 7} ${-h / 2 + 24} L ${w - 12} ${h / 2 - 7}`}
+        fill="none" stroke="#233b50" strokeWidth="0.8" opacity="0.72"
+      />
     </g>
   )
 }
 
 function FSCOpticalPath({ enabled }: { enabled: boolean }) {
-  const y = LASER_Y
-  const srcX = INT_X
-  const srcY = INT_Y
-
   return (
     <g opacity={enabled ? 1 : 0.22}>
-      {/* bench rail along forward axis */}
-      <rect x={FSC_BEAM_STOP_X - 8} y={y + 14} width={FSC_DET_X - FSC_BEAM_STOP_X + 36} height={8} rx="2"
-        fill="#060d14" stroke="#1a3048" strokeWidth="0.8"/>
-
-      <BeamStopDisc x={FSC_BEAM_STOP_X} y={y} enabled={enabled}/>
-
-      <OpticalTube
-        x1={FSC_BEAM_STOP_X + 18} y1={y} x2={FSC_LENS_X - 8} y2={y} enabled={enabled}/>
-      <CollectionLens
-        lx={FSC_LENS_X} ly={FSC_LENS_Y} fx={srcX} fy={srcY}
-        enabled={enabled} tint="fsc"/>
-      <OpticalTube
-        x1={FSC_LENS_X + 8} y1={y} x2={FSC_DET_X - 10} y2={y} enabled={enabled}/>
-      <DetectorHousing
-        dx={FSC_DET_X} dy={FSC_DET_Y} fx={srcX} fy={srcY}
-        enabled={enabled} tint="fsc"/>
+      <OpticalDetectorModule
+        lensX={FSC_LENS_X} lensY={FSC_LENS_Y}
+        detX={FSC_DET_X} detY={FSC_DET_Y}
+        enabled={enabled}/>
     </g>
   )
 }
 
 function SSCOpticalPath({ enabled }: { enabled: boolean }) {
-  const srcX = INT_X
-  const srcY = INT_Y
-
   return (
     <g opacity={enabled ? 1 : 0.22}>
-      {/* bench arm from interrogation zone to SSC module */}
-      <OpticalTube
-        x1={INT_X - 6} y1={INT_Y - 8}
-        x2={SSC_LENS_X + 4} y2={SSC_LENS_Y + 2}
+      <OpticalDetectorModule
+        lensX={SSC_LENS_X} lensY={SSC_LENS_Y}
+        detX={SSC_DET_X} detY={SSC_DET_Y}
         enabled={enabled}/>
-
-      <CollectionLens
-        lx={SSC_LENS_X} ly={SSC_LENS_Y} fx={srcX} fy={srcY}
-        enabled={enabled} tint="ssc"/>
-      <OpticalTube
-        x1={SSC_LENS_X - 6} y1={SSC_LENS_Y - 4}
-        x2={SSC_DET_X + 12} y2={SSC_DET_Y + 4}
-        enabled={enabled}/>
-      <DetectorHousing
-        dx={SSC_DET_X} dy={SSC_DET_Y} fx={srcX} fy={srcY}
-        enabled={enabled} tint="ssc"/>
-
-      {/* bench mount plate */}
-      <rect x={SSC_DET_X - 14} y={SSC_DET_Y + 22} width={52} height={7} rx="2"
-        fill="#060d14" stroke="#1a3048" strokeWidth="0.8"/>
     </g>
   )
 }
@@ -635,15 +554,23 @@ function CellSVG({ cell }: { cell: Cell }) {
 }
 
 function PhotonSVG({ p }: { p: Photon }) {
-  const r = p.kind === "fsc" ? 1.15 : 1.0
-  const grad = p.kind === "fsc" ? "url(#ph-fsc-g)" : "url(#ph-ssc-g)"
-  const core = p.kind === "fsc" ? "#8ef8bc" : "#ffe08a"
+  const r = p.phase === "focus" ? 1.25 : 1.1
+  const grad = p.phase === "focus" ? "url(#ph-focus-g)" : "url(#ph-scatter-g)"
+  const core = p.phase === "focus" ? "#e0fcff" : "#7ee8ff"
+  const trailLen = p.phase === "scatter" ? 10 : 5
   return (
-    <g>
-      <circle cx={p.x} cy={p.y} r={r * 2.2}
-        fill={grad} opacity={p.opacity * 0.35}/>
+    <g opacity={p.opacity} filter="url(#glow-ph)">
+      {p.phase === "scatter" && (
+        <line
+          x1={p.x - p.vx * trailLen * 0.35} y1={p.y - p.vy * trailLen * 0.35}
+          x2={p.x} y2={p.y}
+          stroke="#22d3ee" strokeWidth="0.6" opacity={0.28}
+        />
+      )}
+      <circle cx={p.x} cy={p.y} r={r * 2}
+        fill={grad} opacity={0.38}/>
       <circle cx={p.x} cy={p.y} r={r}
-        fill={core} opacity={p.opacity * 0.82}/>
+        fill={core} opacity={0.88}/>
     </g>
   )
 }
@@ -712,12 +639,13 @@ function Annotations({ laserEnabled, fscEnabled, sscEnabled }:
       {/* SSC path */}
       {sscEnabled && laserEnabled && (
         <g>
-          <path
-            d={`M ${lx - 8} ${y - 6} Q ${(lx + SSC_LENS_X) / 2} ${(y + SSC_LENS_Y) / 2 - 20} ${SSC_LENS_X} ${SSC_LENS_Y}`}
-            stroke="#6b3a00" strokeWidth="0.9" strokeDasharray="3 5" fill="none" opacity="0.7"/>
-          <text x={SSC_DET_X - 18} y={SSC_DET_Y + 52} textAnchor="middle"
-            fill="#7c4400" fontSize="7.5" fontWeight="600">
-            SIDE SCATTER (90°)
+          <line
+            x1={lx} y1={y + 6}
+            x2={SSC_LENS_X - 10} y2={SSC_LENS_Y - 8}
+            stroke="#0e4a5a" strokeWidth="0.9" strokeDasharray="3 5" opacity="0.65"/>
+          <text x={SSC_DET_X + 4} y={SSC_DET_Y + 38} textAnchor="middle"
+            fill="#0d5a6e" fontSize="7.5" fontWeight="600">
+            SIDE SCATTER (~52°)
           </text>
         </g>
       )}
@@ -726,10 +654,10 @@ function Annotations({ laserEnabled, fscEnabled, sscEnabled }:
       {fscEnabled && laserEnabled && (
         <g>
           <line x1={lx + CH_HALF + 4} y1={y + 4}
-            x2={FSC_LENS_X - 6} y2={y + 4}
-            stroke="#0b4a35" strokeWidth="0.9" strokeDasharray="3 5" opacity="0.7"/>
+            x2={FSC_LENS_X - 10} y2={y + 4}
+            stroke="#0e4a5a" strokeWidth="0.9" strokeDasharray="3 5" opacity="0.65"/>
           <text x={FSC_DET_X + 8} y={y + 58} textAnchor="middle"
-            fill="#0a5640" fontSize="7.5" fontWeight="600">
+            fill="#0d5a6e" fontSize="7.5" fontWeight="600">
             FORWARD SCATTER
           </text>
         </g>
@@ -896,6 +824,59 @@ function assignPlotCoords(pop: Population): { fscPlot: number; sscPlot: number }
   }
 }
 
+function focusPhotonToward(
+  p: Photon, targetX: number, targetY: number,
+): Photon {
+  const dx = targetX - p.x
+  const dy = targetY - p.y
+  const spd = Math.hypot(p.vx, p.vy)
+  const spread = (Math.random() - 0.5) * 0.12
+  const baseAng = Math.atan2(dy, dx)
+  const ang = baseAng + spread
+  return {
+    ...p,
+    phase: "focus",
+    vx: Math.cos(ang) * spd,
+    vy: Math.sin(ang) * spd,
+  }
+}
+
+function tryCollectPhoton(p: Photon, fscOn: boolean, sscOn: boolean): Photon {
+  if (p.phase !== "scatter") return p
+
+  if (p.kind === "fsc" && fscOn && p.vx > 0.5) {
+    const crossed = p.x >= FSC_LENS_X - 4 && p.x - p.vx < FSC_LENS_X + 2
+    if (crossed && Math.abs(p.y - FSC_LENS_Y) <= LENS_R) {
+      return focusPhotonToward(p, FSC_DET_X, FSC_DET_Y)
+    }
+  }
+
+  if (p.kind === "ssc" && sscOn) {
+    const prevDist = Math.hypot(p.x - p.vx - SSC_LENS_X, p.y - p.vy - SSC_LENS_Y)
+    const dist = Math.hypot(p.x - SSC_LENS_X, p.y - SSC_LENS_Y)
+    const approaching = dist < prevDist
+    if (approaching && dist <= LENS_R + 2) {
+      return focusPhotonToward(p, SSC_DET_X, SSC_DET_Y)
+    }
+  }
+
+  return p
+}
+
+function absorbPhotonIfInside(p: Photon): Photon | null {
+  if (p.phase !== "focus") return p
+
+  const detX = p.kind === "fsc" ? FSC_DET_X : SSC_DET_X
+  const detY = p.kind === "fsc" ? FSC_DET_Y : SSC_DET_Y
+  const inside = Math.hypot(p.x - detX, p.y - detY) < DETECTOR_BODY_R * 0.85
+
+  if (!inside) return p
+
+  const nextOpacity = p.opacity * 0.72
+  if (nextOpacity < 0.06) return null
+  return { ...p, opacity: nextOpacity }
+}
+
 export function FlowCytometry() {
   const [cellsOn, setCellsOn] = useState(true)
   const [laserOn, setLaserOn] = useState(true)
@@ -969,14 +950,14 @@ export function FlowCytometry() {
 
   const emitPhotons = useCallback((ix: number, iy: number, pop: Population) => {
     const cfg = POPULATION_CONFIG[pop]
-    const nFsc = 30
-    const nSsc = 26
+    const nFsc = 32
+    const nSsc = 28
     const sscBase = Math.atan2(SSC_LENS_Y - iy, SSC_LENS_X - ix)
 
     for (let i = 0; i < nFsc; i++) {
       const spd = 4.2 + Math.random() * 2.4
-      const miss = Math.random() < 0.30
-      const half = miss ? cfg.fscConeHalf * 2.0 : cfg.fscConeHalf
+      const miss = Math.random() < 0.38
+      const half = miss ? cfg.fscConeHalf * 2.4 : cfg.fscConeHalf
       const ang = (Math.random() - 0.5) * 2 * half
       photons.current.push({
         id: mkid(),
@@ -985,16 +966,17 @@ export function FlowCytometry() {
         vx: Math.cos(ang) * spd,
         vy: Math.sin(ang) * spd * (0.55 + Math.random() * 0.35),
         kind: "fsc",
+        phase: "scatter",
         opacity: 0.7 + Math.random() * 0.25,
         age: 0,
-        maxAge: 48 + Math.random() * 16,
+        maxAge: 52 + Math.random() * 18,
       })
     }
 
     for (let i = 0; i < nSsc; i++) {
       const spd = 3.8 + Math.random() * 2.2
-      const miss = Math.random() < 0.32
-      const half = miss ? cfg.sscConeHalf * 1.9 : cfg.sscConeHalf
+      const miss = Math.random() < 0.40
+      const half = miss ? cfg.sscConeHalf * 2.2 : cfg.sscConeHalf
       const ang = sscBase + (Math.random() - 0.5) * 2 * half
       photons.current.push({
         id: mkid(),
@@ -1003,9 +985,10 @@ export function FlowCytometry() {
         vx: Math.cos(ang) * spd,
         vy: Math.sin(ang) * spd,
         kind: "ssc",
+        phase: "scatter",
         opacity: 0.65 + Math.random() * 0.28,
         age: 0,
-        maxAge: 44 + Math.random() * 14,
+        maxAge: 48 + Math.random() * 16,
       })
     }
   }, [])
@@ -1064,13 +1047,19 @@ export function FlowCytometry() {
     }
     pending.current = pending.current.filter(m => f < m.releaseFrame)
 
-    photons.current = photons.current.map(p => ({
-      ...p,
-      x: p.x + p.vx,
-      y: p.y + p.vy,
-      age: p.age + 1,
-      opacity: p.opacity * 0.965,
-    })).filter(p => p.age < p.maxAge && p.opacity > 0.02)
+    photons.current = photons.current
+      .map(p => {
+        let next: Photon = {
+          ...p,
+          x: p.x + p.vx,
+          y: p.y + p.vy,
+          age: p.age + 1,
+          opacity: p.opacity * (p.phase === "focus" ? 0.978 : 0.965),
+        }
+        next = tryCollectPhoton(next, rFsc.current, rSsc.current)
+        return absorbPhotonIfInside(next)
+      })
+      .filter((p): p is Photon => p !== null && p.age < p.maxAge && p.opacity > 0.02)
 
     flashes.current = flashes.current.filter(fl => f - fl.born < 16)
 
