@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react"
+import React, { memo, useEffect, useRef, useState, useCallback } from "react"
 import { useAnimationFrame } from "framer-motion"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
@@ -118,8 +118,6 @@ interface Photon {
   phase: "scatter" | "focus"
   opacity: number; age: number; maxAge: number
 }
-
-interface Flash { id: number; x: number; y: number; born: number }
 
 interface PlotPoint { id: number; fsc: number; ssc: number }
 
@@ -252,15 +250,19 @@ function Defs() {
   )
 }
 
-function SceneGrid() {
+const SCENE_GRID_LINES = (() => {
   const items: React.ReactElement[] = []
   for (let x = 65; x < SVG_W; x += 65)
     items.push(<line key={`v${x}`} x1={x} y1={0} x2={x} y2={SVG_H}/>)
   for (let y = 50; y < SVG_H; y += 50)
     items.push(<line key={`h${y}`} x1={0} y1={y} x2={SVG_W} y2={y}/>)
+  return items
+})()
+
+function SceneGrid() {
   return (
     <g stroke="#0a1d30" strokeWidth="0.4" strokeDasharray="3 14" opacity="0.85">
-      {items}
+      {SCENE_GRID_LINES}
     </g>
   )
 }
@@ -297,19 +299,21 @@ function FlowChannel() {
 
 function LaserBeam({
   enabled,
-  fscEnabled,
   activeCell,
+  performanceMode,
 }: {
   enabled: boolean
-  fscEnabled: boolean
   activeCell?: Cell
+  performanceMode: boolean
 }) {
 
   if (!enabled) return null
 
   const y = LASER_Y
   const x1 = LASER_X1
-  const x2 = fscEnabled ? LASER_X_END - 8 : SVG_W + 20
+  const x2 = LASER_X_END - 8
+  const laserGlow = performanceMode ? undefined : "url(#glow-laser)"
+  const flashGlow = performanceMode ? undefined : "url(#glow-flash)"
 
   const renderSegment = (sx: number, ex: number) => {
     if (ex <= sx) return null
@@ -318,12 +322,12 @@ function LaserBeam({
         <line
           x1={sx} y1={y} x2={ex} y2={y}
           stroke="#1066ff" strokeWidth="64" opacity={0.05}
-          filter="url(#glow-laser)"
+          filter={laserGlow}
         />
         <line
           x1={sx} y1={y} x2={ex} y2={y}
           stroke="#2e8bff" strokeWidth="24" opacity={0.15}
-          filter="url(#glow-laser)"
+          filter={laserGlow}
         />
         <line
           x1={sx} y1={y} x2={ex} y2={y}
@@ -332,7 +336,7 @@ function LaserBeam({
         <line
           x1={sx + 30} y1={y} x2={ex - 20} y2={y}
           stroke="url(#laser-core)" strokeWidth="1.8" opacity={0.92}
-          filter="url(#glow-laser)"
+          filter={laserGlow}
         />
       </>
     )
@@ -342,7 +346,7 @@ function LaserBeam({
     return (
       <g>
         {renderSegment(x1, x2)}
-        <circle cx={INT_X} cy={y} r={7} fill="#a0d8ff" opacity="0.45" filter="url(#glow-flash)"/>
+        <circle cx={INT_X} cy={y} r={7} fill="#a0d8ff" opacity="0.45" filter={flashGlow}/>
         <circle cx={INT_X} cy={y} r={3} fill="#ffffff" opacity="0.85"/>
       </g>
     )
@@ -363,7 +367,7 @@ function LaserBeam({
         r={18}
         fill="#7fd3ff"
         opacity={0.22}
-        filter="url(#glow-flash)"
+        filter={flashGlow}
       />
       <circle
         cx={cellLeftEdge}
@@ -371,7 +375,7 @@ function LaserBeam({
         r={7}
         fill="#c8ecff"
         opacity={0.65}
-        filter="url(#glow-laser)"
+        filter={laserGlow}
       />
       <circle
         cx={cellLeftEdge}
@@ -382,16 +386,17 @@ function LaserBeam({
       />
 
       {/* Interaction point marker (interrogation zone dot) */}
-      <circle cx={INT_X} cy={y} r={7} fill="#a0d8ff" opacity="0.45" filter="url(#glow-flash)"/>
+      <circle cx={INT_X} cy={y} r={7} fill="#a0d8ff" opacity="0.45" filter={flashGlow}/>
       <circle cx={INT_X} cy={y} r={3} fill="#ffffff" opacity="0.85"/>
     </g>
   )
 }
 
-function LaserSource({ enabled }: { enabled: boolean }) {
+function LaserSource({ enabled, performanceMode }: { enabled: boolean; performanceMode: boolean }) {
   const bx = LASER_X0
   const by = LASER_Y - 28
   const c  = enabled ? "#1d5bb9" : "#0f1f35"
+  const laserGlow = enabled && !performanceMode ? "url(#glow-laser)" : undefined
   return (
     <g>
       {/* outer glow */}
@@ -403,7 +408,7 @@ function LaserSource({ enabled }: { enabled: boolean }) {
       <path d={`M ${bx+8} ${by} L ${bx+72} ${by-8} L ${bx+80} ${by+12} L ${bx+72} ${by+48} L ${bx+8} ${by+56} Q ${bx+2} ${by+40} ${bx+2} ${by+28} Q ${bx+2} ${by+16} ${bx+8} ${by}`}
         fill="#050d1a" stroke={c} strokeWidth={enabled ? 1.8 : 1.2}/>
       {/* aperture lens – gradient */}
-      <g filter={enabled ? "url(#glow-laser)" : undefined}>
+      <g filter={laserGlow}>
         <ellipse cx={bx + 76} cy={by + 24} rx={7} ry={13}
           fill={enabled ? "#7fd3ff" : "#0f1f35"}
           opacity={enabled ? 0.92 : 0.25}/>
@@ -416,7 +421,7 @@ function LaserSource({ enabled }: { enabled: boolean }) {
         <circle key={i} cx={bx + 14 + i * 14} cy={by + 24} r={3}
           fill={enabled ? "#4fa3ff" : "#0a1f35"}
           opacity={enabled ? 0.95 : 0.35}
-          filter={enabled ? "url(#glow-laser)" : undefined}/>
+          filter={laserGlow}/>
       ))}
       {/* label */}
       <text x={bx + 38} y={by - 10} textAnchor="middle"
@@ -430,21 +435,25 @@ function LaserSource({ enabled }: { enabled: boolean }) {
 
 /** Shared compact detector module matching the laser source visual language. */
 function OpticalDetectorModule({
-  lensX, lensY, detX, detY, enabled,
+  lensX, lensY, detX, detY, enabled, performanceMode,
 }: {
   lensX: number; lensY: number; detX: number; detY: number; enabled: boolean
+  performanceMode: boolean
 }) {
   const ang = Math.atan2(detY - lensY, detX - lensX) * (180 / Math.PI)
   const w = DETECTOR_MODULE_W
   const h = DETECTOR_MODULE_H
   const c = enabled ? "#1aa6c9" : "#0f1f35"
   const opacity = enabled ? 1 : 0.24
+  const detGlow = enabled && !performanceMode ? "url(#glow-det)" : undefined
+  const cyanGlow = enabled && !performanceMode ? "url(#glow-cyan)" : undefined
+  const laserGlow = enabled && !performanceMode ? "url(#glow-laser)" : undefined
 
   return (
     <g transform={`translate(${detX},${detY}) rotate(${ang})`} opacity={opacity}>
       {enabled && (
         <rect x={-9} y={-h / 2 - 5} width={w + 16} height={h + 10} rx="10"
-          fill="#0a3a99" opacity="0.11" filter="url(#glow-det)"/>
+          fill="#0a3a99" opacity="0.11" filter={detGlow}/>
       )}
 
       {/* Housing mirrors the laser source: compact body with an angled rear cap. */}
@@ -473,7 +482,7 @@ function OpticalDetectorModule({
       />
 
       {/* Front aperture: photons enter here and disappear inside the body. */}
-      <g filter={enabled ? "url(#glow-cyan)" : undefined}>
+      <g filter={cyanGlow}>
         <ellipse cx={0} cy={0} rx={DETECTOR_APERTURE_R + 2.5} ry={15}
           fill={enabled ? "url(#det-aperture-g)" : "#0f1f35"}
           stroke={enabled ? "#9beeff" : "#1a3048"}
@@ -492,7 +501,7 @@ function OpticalDetectorModule({
         <circle key={i} cx={22 + i * 12} cy={h / 2 - 13} r={2.2}
           fill={enabled ? "#4fa3ff" : "#0a1f35"}
           opacity={enabled ? 0.78 : 0.28}
-          filter={enabled ? "url(#glow-laser)" : undefined}/>
+          filter={laserGlow}/>
       ))}
 
       <line x1={18} y1={-h / 2 + 13} x2={w - 24} y2={-h / 2 + 8}
@@ -505,41 +514,107 @@ function OpticalDetectorModule({
   )
 }
 
-function FSCOpticalPath({ enabled }: { enabled: boolean }) {
+function FSCOpticalPath({ enabled, performanceMode }: { enabled: boolean; performanceMode: boolean }) {
   return (
     <g opacity={enabled ? 1 : 0.22}>
       <OpticalDetectorModule
         lensX={FSC_LENS_X} lensY={FSC_LENS_Y}
         detX={FSC_DET_X} detY={FSC_DET_Y}
-        enabled={enabled}/>
+        enabled={enabled}
+        performanceMode={performanceMode}/>
     </g>
   )
 }
 
-function SSCOpticalPath({ enabled }: { enabled: boolean }) {
+function SSCOpticalPath({ enabled, performanceMode }: { enabled: boolean; performanceMode: boolean }) {
   return (
     <g opacity={enabled ? 1 : 0.22}>
       <OpticalDetectorModule
         lensX={SSC_LENS_X} lensY={SSC_LENS_Y}
         detX={SSC_DET_X} detY={SSC_DET_Y}
-        enabled={enabled}/>
+        enabled={enabled}
+        performanceMode={performanceMode}/>
     </g>
   )
 }
 
+const StaticLayer = memo(function StaticLayer({
+  laserOn,
+  fscOn,
+  sscOn,
+  performanceMode,
+}: {
+  laserOn: boolean
+  fscOn: boolean
+  sscOn: boolean
+  performanceMode: boolean
+}) {
+  return (
+    <>
+      <Defs/>
+      <SceneGrid/>
+      <FlowChannel/>
+      <LaserSource enabled={laserOn} performanceMode={performanceMode}/>
+      <FSCOpticalPath enabled={fscOn} performanceMode={performanceMode}/>
+      <SSCOpticalPath enabled={sscOn} performanceMode={performanceMode}/>
+      <Annotations laserEnabled={laserOn} fscEnabled={fscOn} sscEnabled={sscOn}/>
+    </>
+  )
+})
+
+function DynamicLayer({
+  laserOn,
+  cellsOn,
+  plotOn,
+  performanceMode,
+  cells,
+  photons,
+  plotPoints,
+}: {
+  laserOn: boolean
+  cellsOn: boolean
+  plotOn: boolean
+  performanceMode: boolean
+  cells: Cell[]
+  photons: Photon[]
+  plotPoints: PlotPoint[]
+}) {
+  const activeCell = cellsOn
+    ? cells.find(
+        c =>
+          Math.abs(c.y - LASER_Y) < c.r &&
+          Math.abs(c.cx - CH_CX) < CH_HALF
+      )
+    : undefined
+
+  return (
+    <>
+      <LaserBeam
+        enabled={laserOn}
+        activeCell={activeCell}
+        performanceMode={performanceMode}/>
+      {photons.map(p => (
+        <PhotonSVG key={p.id} p={p} performanceMode={performanceMode}/>
+      ))}
+      <g clipPath="url(#channel-clip)">
+        {cellsOn && cells.map(c => (
+          <CellSVG key={c.id} cell={c}/>
+        ))}
+      </g>
+      {plotOn && <FSCSSCPlot points={plotPoints}/>}
+    </>
+  )
+}
+
 function CellSVG({ cell }: { cell: Cell }) {
-  const { cx, y, r, g, scattering, scatterAge } = cell
-  const fade = scattering ? Math.max(0, 1 - scatterAge / 26) : 0
+  const { cx, y, r, g } = cell
   return (
     <g transform={`translate(${cx},${y})`} filter="url(#glow-cell)">
-      {scattering && (
-        <circle r={r + 18} fill="#a0d8ff" opacity={fade * 0.25}/>
-      )}
       <circle r={r}
         fill={`url(#cg${g})`}
-        stroke={scattering ? "#d4f3ff" : "#3284be"}
-        strokeWidth={scattering ? 2.2 : 1}
-        strokeOpacity={scattering ? 0.92 : 0.5}/>
+        stroke="#3284be"
+        strokeWidth={1}
+        strokeOpacity={0.5}/>
       {/* nucleus */}
       <circle r={r * 0.43} cx={r * 0.10} cy={r * 0.10}
         fill="#0d3f6080" opacity="0.85"/>
@@ -553,13 +628,14 @@ function CellSVG({ cell }: { cell: Cell }) {
   )
 }
 
-function PhotonSVG({ p }: { p: Photon }) {
+function PhotonSVG({ p, performanceMode }: { p: Photon; performanceMode: boolean }) {
   const r = p.phase === "focus" ? 1.25 : 1.1
   const grad = p.phase === "focus" ? "url(#ph-focus-g)" : "url(#ph-scatter-g)"
   const core = p.phase === "focus" ? "#e0fcff" : "#7ee8ff"
   const trailLen = p.phase === "scatter" ? 10 : 5
+  const photonGlow = performanceMode ? undefined : "url(#glow-ph)"
   return (
-    <g opacity={p.opacity} filter="url(#glow-ph)">
+    <g opacity={p.opacity} filter={photonGlow}>
       {p.phase === "scatter" && (
         <line
           x1={p.x - p.vx * trailLen * 0.35} y1={p.y - p.vy * trailLen * 0.35}
@@ -575,42 +651,6 @@ function PhotonSVG({ p }: { p: Photon }) {
   )
 }
 
-function FlashSVG({ f, frame }: { f: Flash; frame: number }) {
-  const age = frame - f.born
-
-  // short sharp optical pulse
-  const t = Math.min(1, age / 6)
-
-  // quick disappearance without lingering glow
-  const fade =
-    age < 4
-      ? 1
-      : Math.max(0, 1 - (age - 4) / 2)
-
-  return (
-    <g>
-      {/* outer optical bloom */}
-      <circle
-        cx={f.x}
-        cy={f.y}
-        r={4 + t * 18}
-        fill="#7fd3ff"
-        opacity={fade * 0.18}
-        filter="url(#glow-flash)"
-      />
-
-      {/* bright interaction core */}
-      <circle
-        cx={f.x}
-        cy={f.y}
-        r={2 + t * 8}
-        fill="#dff4ff"
-        opacity={fade * 0.55}
-      />
-    </g>
-  )
-}
-
 function Annotations({ laserEnabled, fscEnabled, sscEnabled }:
   { laserEnabled: boolean; fscEnabled: boolean; sscEnabled: boolean }) {
   const y  = LASER_Y
@@ -618,24 +658,6 @@ function Annotations({ laserEnabled, fscEnabled, sscEnabled }:
 
   return (
     <g fontFamily="monospace" fontSize="7.5" letterSpacing="0.08em">
-      {/* Interrogation zone */}
-      {laserEnabled && (
-        <g>
-          <line x1={lx - CH_HALF - 2} y1={y - 26} x2={lx + CH_HALF + 2} y2={y - 26}
-            stroke="#164e63" strokeWidth="0.9"/>
-          <line x1={lx - CH_HALF - 2} y1={y - 26} x2={lx - CH_HALF - 2} y2={y + 8}
-            stroke="#164e63" strokeWidth="0.9"/>
-          <line x1={lx + CH_HALF + 2} y1={y - 26} x2={lx + CH_HALF + 2} y2={y + 8}
-            stroke="#164e63" strokeWidth="0.9"/>
-          <line x1={lx + CH_HALF + 4} y1={y - 22}
-            x2={lx + CH_HALF + 76} y2={y - 58}
-            stroke="#164e63" strokeWidth="0.8" strokeDasharray="2 5"/>
-          <text x={lx + CH_HALF + 80} y={y - 60} fill="#0d3f52" fontSize="7.5" fontWeight="600">
-            INTERROGATION ZONE
-          </text>
-        </g>
-      )}
-
       {/* SSC path */}
       {sscEnabled && laserEnabled && (
         <g>
@@ -643,9 +665,9 @@ function Annotations({ laserEnabled, fscEnabled, sscEnabled }:
             x1={lx} y1={y + 6}
             x2={SSC_LENS_X - 10} y2={SSC_LENS_Y - 8}
             stroke="#0e4a5a" strokeWidth="0.9" strokeDasharray="3 5" opacity="0.65"/>
-          <text x={SSC_DET_X + 4} y={SSC_DET_Y + 38} textAnchor="middle"
+          <text x={SSC_DET_X + 4} y={SSC_DET_Y + 50} textAnchor="middle"
             fill="#0d5a6e" fontSize="7.5" fontWeight="600">
-            SIDE SCATTER (~52°)
+            SIDE SCATTER
           </text>
         </g>
       )}
@@ -653,9 +675,6 @@ function Annotations({ laserEnabled, fscEnabled, sscEnabled }:
       {/* FSC path */}
       {fscEnabled && laserEnabled && (
         <g>
-          <line x1={lx + CH_HALF + 4} y1={y + 4}
-            x2={FSC_LENS_X - 10} y2={y + 4}
-            stroke="#0e4a5a" strokeWidth="0.9" strokeDasharray="3 5" opacity="0.65"/>
           <text x={FSC_DET_X + 8} y={y + 58} textAnchor="middle"
             fill="#0d5a6e" fontSize="7.5" fontWeight="600">
             FORWARD SCATTER
@@ -739,20 +758,14 @@ function ControlRow({
 }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="relative flex-shrink-0 size-2.5">
-        {enabled && (
-          <div className="absolute inset-0 animate-ping rounded-full opacity-60"
-            style={{ backgroundColor: color }}/>
-        )}
-        <div className="relative size-2.5 rounded-full transition-all duration-500 shadow-lg"
-          style={{
-            backgroundColor: enabled ? color : "oklch(0.18 0.03 240)",
-            boxShadow: enabled ? `0 0 12px ${color}` : "none",
-          }}/>
-      </div>
+      <div className="flex-shrink-0 size-2.5 rounded-full shadow-lg"
+        style={{
+          backgroundColor: enabled ? color : "oklch(0.18 0.03 240)",
+          boxShadow: enabled ? `0 0 12px ${color}` : "none",
+        }}/>
       <div className="flex flex-1 flex-col gap-0.5">
         <Label className="cursor-pointer font-mono text-[11px] font-semibold tracking-widest uppercase"
-          style={{ color: enabled ? color : "oklch(0.26 0.04 240)" }}>
+          style={{ color }}>
           {label}
         </Label>
         <span className="font-mono text-[8.5px]"
@@ -779,19 +792,13 @@ function PopulationRow({
 }) {
   return (
     <div className={`flex items-center gap-2.5 ${disabled ? "opacity-40 pointer-events-none" : ""}`}>
-      <div className="relative flex-shrink-0 size-2">
-        {enabled && !disabled && (
-          <div className="absolute inset-0 animate-ping rounded-full opacity-50"
-            style={{ backgroundColor: color }}/>
-        )}
-        <div className="relative size-2 rounded-full transition-all duration-500"
-          style={{
-            backgroundColor: enabled && !disabled ? color : "oklch(0.18 0.03 240)",
-            boxShadow: enabled && !disabled ? `0 0 8px ${color}` : "none",
-          }}/>
-      </div>
+      <div className="flex-shrink-0 size-2 rounded-full"
+        style={{
+          backgroundColor: enabled && !disabled ? color : "oklch(0.18 0.03 240)",
+          boxShadow: enabled && !disabled ? `0 0 8px ${color}` : "none",
+        }}/>
       <Label className="flex-1 cursor-pointer font-mono text-[9.5px] font-medium tracking-widest uppercase"
-        style={{ color: enabled && !disabled ? color : "oklch(0.26 0.04 240)" }}>
+        style={{ color: disabled ? "oklch(0.26 0.04 240)" : color }}>
         {label}
       </Label>
       <Switch
@@ -877,15 +884,38 @@ function absorbPhotonIfInside(p: Photon): Photon | null {
   return { ...p, opacity: nextOpacity }
 }
 
+function PerformanceStatsOverlay({
+  fps,
+  cells,
+  photons,
+}: {
+  fps: number
+  cells: number
+  photons: number
+}) {
+  return (
+    <div
+      className="pointer-events-none absolute right-3 top-3 z-10 rounded-md px-2.5 py-2 font-mono text-[10px] leading-relaxed text-white"
+      style={{ background: "rgba(0, 0, 0, 0.55)" }}>
+      <div>FPS: {fps}</div>
+      <div>Cells: {cells}</div>
+      <div>Photons: {photons}</div>
+    </div>
+  )
+}
+
 export function FlowCytometry() {
-  const [cellsOn, setCellsOn] = useState(true)
-  const [laserOn, setLaserOn] = useState(true)
-  const [fscOn,   setFscOn]   = useState(true)
-  const [sscOn,   setSscOn]   = useState(true)
+  const [cellsOn, setCellsOn] = useState(false)
+  const [laserOn, setLaserOn] = useState(false)
+  const [fscOn,   setFscOn]   = useState(false)
+  const [sscOn,   setSscOn]   = useState(false)
   const [lymphOn, setLymphOn] = useState(true)
   const [monoOn,  setMonoOn]  = useState(true)
   const [granOn,  setGranOn]  = useState(true)
-  const [plotOn,  setPlotOn]  = useState(true)
+  const [plotOn,  setPlotOn]  = useState(false)
+  const [performanceMode, setPerformanceMode] = useState(false)
+  const [showPerfStats, setShowPerfStats] = useState(false)
+  const [perfStats, setPerfStats] = useState({ fps: 0, cells: 0, photons: 0 })
 
   const rCells = useRef(cellsOn)
   const rLaser = useRef(laserOn)
@@ -906,11 +936,21 @@ export function FlowCytometry() {
 
   const cells      = useRef<Cell[]>([])
   const photons    = useRef<Photon[]>([])
-  const flashes    = useRef<Flash[]>([])
   const plotPoints = useRef<PlotPoint[]>([])
   const pending    = useRef<PendingMeasurement[]>([])
   const frameRef   = useRef(0)
   const [, bump]   = useState(0)
+  const rShowPerfStats = useRef(showPerfStats)
+  const perfFrameCount = useRef(0)
+  const perfLastSample = useRef(performance.now())
+
+  useEffect(() => { rShowPerfStats.current = showPerfStats }, [showPerfStats])
+  useEffect(() => {
+    if (showPerfStats) {
+      perfFrameCount.current = 0
+      perfLastSample.current = performance.now()
+    }
+  }, [showPerfStats])
 
   const handlePlotChange = useCallback((on: boolean) => {
     setPlotOn(on)
@@ -1018,7 +1058,6 @@ export function FlowCytometry() {
       ) {
         scattering = true
         scatterAge = 0
-        flashes.current.push({ id: mkid(), x: c.cx, y: LASER_Y, born: f })
         emitPhotons(c.cx, LASER_Y, c.population)
         pending.current.push({
           id: mkid(),
@@ -1061,7 +1100,20 @@ export function FlowCytometry() {
       })
       .filter((p): p is Photon => p !== null && p.age < p.maxAge && p.opacity > 0.02)
 
-    flashes.current = flashes.current.filter(fl => f - fl.born < 16)
+    if (rShowPerfStats.current) {
+      perfFrameCount.current++
+      const now = performance.now()
+      const elapsed = now - perfLastSample.current
+      if (elapsed >= 250) {
+        setPerfStats({
+          fps: Math.round((perfFrameCount.current * 1000) / elapsed),
+          cells: cells.current.length,
+          photons: photons.current.length,
+        })
+        perfFrameCount.current = 0
+        perfLastSample.current = now
+      }
+    }
 
     if (f % 2 === 0) bump(n => n + 1)
   })
@@ -1107,6 +1159,14 @@ export function FlowCytometry() {
               label="Plot" sublabel="FSC / SSC Acquisition"
               enabled={plotOn} onChange={handlePlotChange}
               color="oklch(0.58 0.04 250)"/>
+            <ControlRow
+              label="Performance Mode" sublabel="Disable SVG glow filters"
+              enabled={performanceMode} onChange={setPerformanceMode}
+              color="oklch(0.55 0.08 280)"/>
+            <ControlRow
+              label="Show Performance Stats" sublabel="Display FPS and object counts"
+              enabled={showPerfStats} onChange={setShowPerfStats}
+              color="oklch(0.52 0.06 250)"/>
           </div>
 
           {cellsOn && (
@@ -1164,43 +1224,29 @@ export function FlowCytometry() {
             preserveAspectRatio="xMidYMid meet"
             className="absolute inset-0 h-full w-full">
 
-            <Defs/>
-            <SceneGrid/>
-            <FlowChannel/>
-            <LaserBeam
-              enabled={laserOn}
-              fscEnabled={fscOn}
-              activeCell={
-                cellsOn
-                  ? cells.current.find(
-                      c =>
-                        Math.abs(c.y - LASER_Y) < c.r &&
-                        Math.abs(c.cx - CH_CX) < CH_HALF
-                    )
-                  : undefined
-              }
+            <StaticLayer
+              laserOn={laserOn}
+              fscOn={fscOn}
+              sscOn={sscOn}
+              performanceMode={performanceMode}/>
+            <DynamicLayer
+              laserOn={laserOn}
+              cellsOn={cellsOn}
+              plotOn={plotOn}
+              performanceMode={performanceMode}
+              cells={cells.current}
+              photons={photons.current}
+              plotPoints={plotPoints.current}
             />
-            <LaserSource enabled={laserOn}/>
-            <FSCOpticalPath enabled={fscOn}/>
-            <SSCOpticalPath enabled={sscOn}/>
-
-            {/* Rendered elements */}
-            {flashes.current.map(fl => (
-              <FlashSVG key={fl.id} f={fl} frame={frameRef.current}/>
-            ))}
-            {photons.current.map(p => (
-              <PhotonSVG key={p.id} p={p}/>
-            ))}
-
-            <g clipPath="url(#channel-clip)">
-              {cellsOn && cells.current.map(c => (
-                <CellSVG key={c.id} cell={c}/>
-              ))}
-            </g>
-
-            {plotOn && <FSCSSCPlot points={plotPoints.current}/>}
-            <Annotations laserEnabled={laserOn} fscEnabled={fscOn} sscEnabled={sscOn}/>
           </svg>
+
+          {showPerfStats && (
+            <PerformanceStatsOverlay
+              fps={perfStats.fps}
+              cells={perfStats.cells}
+              photons={perfStats.photons}
+            />
+          )}
 
           {plotOn && (
             <Button
