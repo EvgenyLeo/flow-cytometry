@@ -10,16 +10,16 @@ const SVG_H   = 680
 const CH_CX   = 420
 const CH_HALF = 22
 
-const LASER_Y  = 340
+const LASER_Y  = 292
 const LASER_X0 = 50
 const LASER_X1 = LASER_X0 + 76
 
 const INT_X = CH_CX
 const INT_Y = LASER_Y
 
-const FSC_LENS_X = 618
+const FSC_LENS_X = 548
 const FSC_LENS_Y = LASER_Y
-const FSC_DET_X  = 712
+const FSC_DET_X  = 648
 const FSC_DET_Y  = LASER_Y
 const LASER_X_END = FSC_LENS_X - 34
 
@@ -30,6 +30,26 @@ const SSC_LENS_X = INT_X + Math.cos(SSC_ANGLE) * SSC_LENS_DIST
 const SSC_LENS_Y = INT_Y + Math.sin(SSC_ANGLE) * SSC_LENS_DIST
 const SSC_DET_X  = SSC_LENS_X + Math.cos(SSC_ANGLE) * SSC_DET_OFFSET
 const SSC_DET_Y  = SSC_LENS_Y + Math.sin(SSC_ANGLE) * SSC_DET_OFFSET
+
+// Fluorescence bench — vertical detector stack (visual layout)
+const FL_BEAM_END = LASER_X_END - 8
+const DET_STACK_X = FSC_DET_X
+const DET_SPACING   = 96
+const FL1_DET_X     = DET_STACK_X
+const FL1_DET_Y     = LASER_Y + DET_SPACING
+const FL2_DET_X     = DET_STACK_X
+const FL2_DET_Y     = LASER_Y + DET_SPACING * 2
+const FSC_MIRROR_X  = 488
+const FSC_MIRROR_Y  = LASER_Y
+const MIRROR1_X     = 488
+const MIRROR1_Y     = FL1_DET_Y
+const MIRROR2_X     = 488
+const MIRROR2_Y     = FL2_DET_Y
+
+// Compact education panels
+const EDU_Y0      = LASER_Y + 56
+const EDU_TUBES_X = 36
+const EDU_PHENO_X = 172
 
 const LENS_R = 16
 const DETECTOR_APERTURE_R = 5
@@ -177,7 +197,7 @@ function Defs() {
       </linearGradient>
 
       {/* Laser beam – userSpaceOnUse for proper line gradients */}
-      <linearGradient id="laser-gr" x1={LASER_X1} y1={LASER_Y} x2={LASER_X_END} y2={LASER_Y}
+      <linearGradient id="laser-gr" x1={LASER_X1} y1={LASER_Y} x2={FL_BEAM_END} y2={LASER_Y}
         gradientUnits="userSpaceOnUse">
         <stop offset="0%"   stopColor="#0066ff" stopOpacity="0.05"/>
         <stop offset="8%"   stopColor="#1e7ff9" stopOpacity="1"/>
@@ -189,7 +209,7 @@ function Defs() {
       </linearGradient>
 
       <linearGradient id="laser-core"
-        x1={LASER_X1 + 30} y1={LASER_Y} x2={LASER_X_END - 20} y2={LASER_Y}
+        x1={LASER_X1 + 30} y1={LASER_Y} x2={FL_BEAM_END - 20} y2={LASER_Y}
         gradientUnits="userSpaceOnUse">
         <stop offset="0%"   stopColor="#ffffff" stopOpacity="0"/>
         <stop offset="15%"  stopColor="#ffffff" stopOpacity="0.88"/>
@@ -311,7 +331,7 @@ function LaserBeam({
 
   const y = LASER_Y
   const x1 = LASER_X1
-  const x2 = LASER_X_END - 8
+  const x2 = FL_BEAM_END
   const laserGlow = performanceMode ? undefined : "url(#glow-laser)"
   const flashGlow = performanceMode ? undefined : "url(#glow-flash)"
 
@@ -514,24 +534,77 @@ function OpticalDetectorModule({
   )
 }
 
+function FluorescenceMirror({
+  x, y, angle, enabled, performanceMode,
+}: {
+  x: number; y: number; angle: number
+  enabled: boolean; performanceMode: boolean
+}) {
+  const glow = enabled && !performanceMode ? "url(#glow-cyan)" : undefined
+  return (
+    <g transform={`translate(${x},${y}) rotate(${angle})`} opacity={enabled ? 0.9 : 0.28}>
+      <g filter={glow}>
+        <rect
+          x={-13} y={-2.5} width={26} height={5} rx={0.8}
+          fill={enabled ? "#2a4058" : "#0f1f35"}
+          stroke={enabled ? "#5a7890" : "#1a3048"}
+          strokeWidth={0.7}
+        />
+      </g>
+    </g>
+  )
+}
+
+function HorizontalDetectorModule({
+  detX, detY, lensX, enabled, performanceMode,
+}: {
+  detX: number; detY: number; lensX: number
+  enabled: boolean; performanceMode: boolean
+}) {
+  return (
+    <OpticalDetectorModule
+      lensX={lensX}
+      lensY={detY}
+      detX={detX}
+      detY={detY}
+      enabled={enabled}
+      performanceMode={performanceMode}/>
+  )
+}
+
 function FSCOpticalPath({ enabled, performanceMode }: { enabled: boolean; performanceMode: boolean }) {
   return (
     <g opacity={enabled ? 1 : 0.22}>
-      <OpticalDetectorModule
-        lensX={FSC_LENS_X} lensY={FSC_LENS_Y}
-        detX={FSC_DET_X} detY={FSC_DET_Y}
+      <HorizontalDetectorModule
+        lensX={FSC_MIRROR_X}
+        detX={FSC_DET_X}
+        detY={FSC_DET_Y}
         enabled={enabled}
         performanceMode={performanceMode}/>
     </g>
   )
 }
 
-function SSCOpticalPath({ enabled, performanceMode }: { enabled: boolean; performanceMode: boolean }) {
+function FL1OpticalPath({ enabled, performanceMode }: { enabled: boolean; performanceMode: boolean }) {
   return (
     <g opacity={enabled ? 1 : 0.22}>
-      <OpticalDetectorModule
-        lensX={SSC_LENS_X} lensY={SSC_LENS_Y}
-        detX={SSC_DET_X} detY={SSC_DET_Y}
+      <HorizontalDetectorModule
+        lensX={MIRROR1_X}
+        detX={FL1_DET_X}
+        detY={FL1_DET_Y}
+        enabled={enabled}
+        performanceMode={performanceMode}/>
+    </g>
+  )
+}
+
+function FL2OpticalPath({ enabled, performanceMode }: { enabled: boolean; performanceMode: boolean }) {
+  return (
+    <g opacity={enabled ? 1 : 0.22}>
+      <HorizontalDetectorModule
+        lensX={MIRROR2_X}
+        detX={FL2_DET_X}
+        detY={FL2_DET_Y}
         enabled={enabled}
         performanceMode={performanceMode}/>
     </g>
@@ -541,12 +614,14 @@ function SSCOpticalPath({ enabled, performanceMode }: { enabled: boolean; perfor
 const StaticLayer = memo(function StaticLayer({
   laserOn,
   fscOn,
-  sscOn,
+  fl1On,
+  fl2On,
   performanceMode,
 }: {
   laserOn: boolean
   fscOn: boolean
-  sscOn: boolean
+  fl1On: boolean
+  fl2On: boolean
   performanceMode: boolean
 }) {
   return (
@@ -555,9 +630,17 @@ const StaticLayer = memo(function StaticLayer({
       <SceneGrid/>
       <FlowChannel/>
       <LaserSource enabled={laserOn} performanceMode={performanceMode}/>
+      <InstrumentEducationArea/>
       <FSCOpticalPath enabled={fscOn} performanceMode={performanceMode}/>
-      <SSCOpticalPath enabled={sscOn} performanceMode={performanceMode}/>
-      <Annotations laserEnabled={laserOn} fscEnabled={fscOn} sscEnabled={sscOn}/>
+      <FluorescenceMirror enabled={fscOn} performanceMode={performanceMode} x={FSC_MIRROR_X} y={FSC_MIRROR_Y} angle={45}/>
+      <FluorescenceMirror enabled={laserOn} performanceMode={performanceMode} x={MIRROR1_X} y={MIRROR1_Y} angle={45}/>
+      <FluorescenceMirror enabled={laserOn} performanceMode={performanceMode} x={MIRROR2_X} y={MIRROR2_Y} angle={45}/>
+      <FL1OpticalPath enabled={fl1On} performanceMode={performanceMode}/>
+      <FL2OpticalPath enabled={fl2On} performanceMode={performanceMode}/>
+      <FluorescenceAnnotations
+        fscEnabled={fscOn}
+        fl1Enabled={fl1On}
+        fl2Enabled={fl2On}/>
     </>
   )
 })
@@ -593,7 +676,7 @@ function DynamicLayer({
         enabled={laserOn}
         activeCell={activeCell}
         performanceMode={performanceMode}/>
-      {photons.map(p => (
+      {photons.filter(p => p.kind !== "ssc").map(p => (
         <PhotonSVG key={p.id} p={p} performanceMode={performanceMode}/>
       ))}
       <g clipPath="url(#channel-clip)">
@@ -601,7 +684,7 @@ function DynamicLayer({
           <CellSVG key={c.id} cell={c}/>
         ))}
       </g>
-      {plotOn && <FSCSSCPlot points={plotPoints}/>}
+      {plotOn && <FluorescencePlot points={plotPoints}/>}
     </>
   )
 }
@@ -651,49 +734,50 @@ function PhotonSVG({ p, performanceMode }: { p: Photon; performanceMode: boolean
   )
 }
 
-function Annotations({ laserEnabled, fscEnabled, sscEnabled }:
-  { laserEnabled: boolean; fscEnabled: boolean; sscEnabled: boolean }) {
-  const y  = LASER_Y
-  const lx = CH_CX
-
+function FluorescenceAnnotations({
+  fscEnabled,
+  fl1Enabled,
+  fl2Enabled,
+}: {
+  fscEnabled: boolean
+  fl1Enabled: boolean
+  fl2Enabled: boolean
+}) {
   return (
     <g fontFamily="monospace" fontSize="7.5" letterSpacing="0.08em">
-      {/* SSC path */}
-      {sscEnabled && laserEnabled && (
-        <g>
-          <line
-            x1={lx} y1={y + 6}
-            x2={SSC_LENS_X - 10} y2={SSC_LENS_Y - 8}
-            stroke="#0e4a5a" strokeWidth="0.9" strokeDasharray="3 5" opacity="0.65"/>
-          <text x={SSC_DET_X + 4} y={SSC_DET_Y + 50} textAnchor="middle"
-            fill="#0d5a6e" fontSize="7.5" fontWeight="600">
-            SIDE SCATTER
-          </text>
-        </g>
+      {fscEnabled && (
+        <text x={FSC_DET_X + 44} y={FSC_DET_Y + 4} textAnchor="start"
+          fill="#0d5a6e" fontSize="7.5" fontWeight="600">
+          FSC
+        </text>
       )}
 
-      {/* FSC path */}
-      {fscEnabled && laserEnabled && (
-        <g>
-          <text x={FSC_DET_X + 8} y={y + 58} textAnchor="middle"
-            fill="#0d5a6e" fontSize="7.5" fontWeight="600">
-            FORWARD SCATTER
-          </text>
-        </g>
+      {fl1Enabled && (
+        <text x={FL1_DET_X + 44} y={FL1_DET_Y + 4} textAnchor="start"
+          fill="#0d5a6e" fontSize="7.5" fontWeight="600">
+          FL1 (FITC)
+        </text>
+      )}
+
+      {fl2Enabled && (
+        <text x={FL2_DET_X + 44} y={FL2_DET_Y + 4} textAnchor="start"
+          fill="#0d5a6e" fontSize="7.5" fontWeight="600">
+          FL2 (PE)
+        </text>
       )}
 
       {/* watermark */}
       <text x={10} y={SVG_H - 8} fill="#0a1f35" fontSize="6.5" fontWeight="500">
-        Optical bench — 488 nm excitation
+        Fluorescence bench — 488 nm excitation
       </text>
       <text x={SVG_W - 10} y={SVG_H - 8} textAnchor="end" fill="#0a1f35" fontSize="6.5" fontWeight="500">
-        Flow cytometry simulation
+        Fluorescence detection simulation
       </text>
     </g>
   )
 }
 
-function FSCSSCPlot({ points }: { points: PlotPoint[] }) {
+function FluorescencePlot({ points }: { points: PlotPoint[] }) {
   const ix = PLOT_X + PLOT_MARGIN
   const iy = PLOT_Y + PLOT_MARGIN
   const iw = PLOT_W - PLOT_MARGIN * 2
@@ -736,15 +820,89 @@ function FSCSSCPlot({ points }: { points: PlotPoint[] }) {
         x={PLOT_X + PLOT_W / 2} y={PLOT_Y + PLOT_H - 6}
         textAnchor="middle" fill="#3a4048"
         fontSize="8" fontFamily="monospace" fontWeight="600" letterSpacing="0.06em">
-        FSC-A
+        CD4 (FITC)
       </text>
       <text
         x={PLOT_X + 9} y={PLOT_Y + PLOT_H / 2}
         textAnchor="middle" fill="#3a4048"
         fontSize="8" fontFamily="monospace" fontWeight="600" letterSpacing="0.06em"
         transform={`rotate(-90 ${PLOT_X + 9} ${PLOT_Y + PLOT_H / 2})`}>
-        SSC-A
+        CD8 (PE)
       </text>
+    </g>
+  )
+}
+
+function CompactTubeSVG({
+  x, y, label, liquidColor, capColor, showCells = false,
+}: {
+  x: number; y: number; label: string; liquidColor: string; capColor?: string
+  showCells?: boolean
+}) {
+  const cap = capColor ?? "#1a3048"
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <rect x={7} y={2} width={12} height={4} rx={1} fill={cap} stroke="#2a4560" strokeWidth="0.4"/>
+      <rect x={5} y={6} width={16} height={28} rx={3.5} fill="#07111a" stroke="#2a4560" strokeWidth="0.5"/>
+      <rect x={7} y={showCells ? 15 : 17} width={12} height={showCells ? 14 : 12} rx={1.5} fill={liquidColor} opacity="0.8"/>
+      {showCells && (
+        <>
+          <circle cx={10} cy={19} r={1.6} fill="#2fa0d6" opacity="0.9"/>
+          <circle cx={15} cy={23} r={1.6} fill="#2fa0d6" opacity="0.85"/>
+        </>
+      )}
+      <text x={26} y={16} fill="#3a8ab0" fontSize="7.5" fontFamily="monospace" fontWeight="600">
+        {label}
+      </text>
+    </g>
+  )
+}
+
+function CompactPhenotypeRowSVG({
+  x, y, title, markers, dotColor,
+}: {
+  x: number; y: number; title: string; markers: string; dotColor: string
+}) {
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <circle cx={7} cy={10} r={4} fill={dotColor} opacity="0.85"/>
+      <text x={16} y={9} fill="#62b4d0" fontSize="7.5" fontFamily="monospace" fontWeight="600">
+        {title}
+      </text>
+      <text x={16} y={18} fill="#284860" fontSize="7" fontFamily="monospace">
+        {markers}
+      </text>
+    </g>
+  )
+}
+
+function InstrumentEducationArea() {
+  const tubesY = EDU_Y0 + 22
+  const phenoY = EDU_Y0 + 22
+  return (
+    <g fontFamily="monospace">
+      {/* Tubes & Dyes — left panel */}
+      <rect
+        x={EDU_TUBES_X} y={EDU_Y0} width={128} height={136} rx={8}
+        fill="#040a12" stroke="#122840" strokeWidth="0.8" opacity="0.88"/>
+      <text x={EDU_TUBES_X + 10} y={EDU_Y0 + 16} fill="#3a8ab0" fontSize="8" fontWeight="600" letterSpacing="0.12em">
+        TUBES &amp; DYES
+      </text>
+      <CompactTubeSVG x={EDU_TUBES_X + 10} y={tubesY} label="Sample Tube" liquidColor="#1a5a8a" capColor="#6b4fa0" showCells/>
+      <CompactTubeSVG x={EDU_TUBES_X + 10} y={tubesY + 38} label="Anti-CD4 (FITC)" liquidColor="#22c55e" capColor="#22c55e"/>
+      <CompactTubeSVG x={EDU_TUBES_X + 10} y={tubesY + 76} label="Anti-CD8 (PE)" liquidColor="#ef4444" capColor="#ef4444"/>
+
+      {/* Cell Phenotype Panel — right panel */}
+      <rect
+        x={EDU_PHENO_X} y={EDU_Y0} width={176} height={136} rx={8}
+        fill="#040a12" stroke="#122840" strokeWidth="0.8" opacity="0.88"/>
+      <text x={EDU_PHENO_X + 10} y={EDU_Y0 + 16} fill="#3a8ab0" fontSize="8" fontWeight="600" letterSpacing="0.1em">
+        CELL PHENOTYPE PANEL
+      </text>
+      <CompactPhenotypeRowSVG x={EDU_PHENO_X + 8} y={phenoY} title="Helper T Cell" markers="CD4+ CD8−" dotColor="#22c55e"/>
+      <CompactPhenotypeRowSVG x={EDU_PHENO_X + 8} y={phenoY + 28} title="Cytotoxic T Cell" markers="CD4− CD8+" dotColor="#f97316"/>
+      <CompactPhenotypeRowSVG x={EDU_PHENO_X + 8} y={phenoY + 56} title="Double Positive T Cell" markers="CD4+ CD8+" dotColor="#a855f7"/>
+      <CompactPhenotypeRowSVG x={EDU_PHENO_X + 8} y={phenoY + 84} title="Double Negative T Cell" markers="CD4− CD8−" dotColor="#64748b"/>
     </g>
   )
 }
@@ -904,11 +1062,12 @@ function PerformanceStatsOverlay({
   )
 }
 
-export function FlowCytometry() {
+export function FluorescenceDetection() {
   const [cellsOn, setCellsOn] = useState(false)
   const [laserOn, setLaserOn] = useState(false)
   const [fscOn,   setFscOn]   = useState(false)
-  const [sscOn,   setSscOn]   = useState(false)
+  const [fl1On,   setFl1On]   = useState(false)
+  const [fl2On,   setFl2On]   = useState(false)
   const [lymphOn, setLymphOn] = useState(true)
   const [monoOn,  setMonoOn]  = useState(true)
   const [granOn,  setGranOn]  = useState(true)
@@ -920,7 +1079,7 @@ export function FlowCytometry() {
   const rCells = useRef(cellsOn)
   const rLaser = useRef(laserOn)
   const rFsc   = useRef(fscOn)
-  const rSsc   = useRef(sscOn)
+  const rSsc   = useRef(false)
   const rLymph = useRef(lymphOn)
   const rMono  = useRef(monoOn)
   const rGran  = useRef(granOn)
@@ -928,7 +1087,6 @@ export function FlowCytometry() {
   useEffect(() => { rCells.current = cellsOn }, [cellsOn])
   useEffect(() => { rLaser.current = laserOn }, [laserOn])
   useEffect(() => { rFsc.current   = fscOn   }, [fscOn])
-  useEffect(() => { rSsc.current   = sscOn   }, [sscOn])
   useEffect(() => { rLymph.current = lymphOn }, [lymphOn])
   useEffect(() => { rMono.current  = monoOn  }, [monoOn])
   useEffect(() => { rGran.current  = granOn  }, [granOn])
@@ -1148,15 +1306,19 @@ export function FlowCytometry() {
               enabled={laserOn} onChange={setLaserOn}
               color="oklch(0.62 0.22 254)"/>
             <ControlRow
-              label="FSC Detector" sublabel="Forward Scatter"
+              label="FSC Detector" sublabel="Event Detection"
               enabled={fscOn} onChange={setFscOn}
               color="oklch(0.64 0.18 158)"/>
             <ControlRow
-              label="SSC Detector" sublabel="Side Scatter"
-              enabled={sscOn} onChange={setSscOn}
+              label="FL1" sublabel="FITC Channel"
+              enabled={fl1On} onChange={setFl1On}
+              color="oklch(0.58 0.16 145)"/>
+            <ControlRow
+              label="FL2" sublabel="PE Channel"
+              enabled={fl2On} onChange={setFl2On}
               color="oklch(0.72 0.16 52)"/>
             <ControlRow
-              label="Plot" sublabel="FSC / SSC Acquisition"
+              label="Plot" sublabel="CD4 / CD8 Acquisition"
               enabled={plotOn} onChange={handlePlotChange}
               color="oklch(0.58 0.04 250)"/>
             <ControlRow
@@ -1204,7 +1366,7 @@ export function FlowCytometry() {
           style={{ background: "oklch(0.064 0.014 232)", borderColor: "oklch(0.11 0.04 234)" }}>
           <span className="font-mono text-[7.5px] tracking-[0.26em] uppercase"
             style={{ color: "oklch(0.24 0.05 234)" }}>
-            Optical Path — Real-time Visualization
+            Optical Path — Fluorescence Detection
           </span>
           <div className="ml-auto flex items-center gap-3">
             <span className="font-mono text-[7.5px]" style={{ color: "oklch(0.22 0.04 234)" }}>
@@ -1227,7 +1389,8 @@ export function FlowCytometry() {
             <StaticLayer
               laserOn={laserOn}
               fscOn={fscOn}
-              sscOn={sscOn}
+              fl1On={fl1On}
+              fl2On={fl2On}
               performanceMode={performanceMode}/>
             <DynamicLayer
               laserOn={laserOn}

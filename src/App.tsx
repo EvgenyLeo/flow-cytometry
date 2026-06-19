@@ -1,16 +1,22 @@
 import { useState } from "react"
 
 import HomePage from "./pages/HomePage"
-import OpticsPage from "./pages/OpticsPage"
-
+import ScatterDetectionPage from "./pages/ScatterDetectionPage"
+import FluorescenceDetectionPage from "./pages/FluorescenceDetectionPage"
 import HydrodynamicPage from "./pages/HydrodynamicPage"
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState("home")
 
-  if (currentPage === "optics") {
+  if (currentPage === "scatter") {
     return (
-      <OpticsPage setCurrentPage={setCurrentPage} />
+      <ScatterDetectionPage setCurrentPage={setCurrentPage} />
+    )
+  }
+
+  if (currentPage === "fluorescence") {
+    return (
+      <FluorescenceDetectionPage setCurrentPage={setCurrentPage} />
     )
   }
 

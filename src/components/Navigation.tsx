@@ -90,9 +90,9 @@ type NavigationProps = {
             Hydrodynamic Focusing
           </button>
   
-          {/* Optics */}
+          {/* Scatter Detection */}
           <button
-            onClick={() => setCurrentPage("optics")}
+            onClick={() => setCurrentPage("scatter")}
             className="
               relative
               transition-all
@@ -107,7 +107,27 @@ type NavigationProps = {
               hover:after:w-full
             "
           >
-            Optics & Detection
+            Scatter Detection
+          </button>
+
+          {/* Fluorescence Detection */}
+          <button
+            onClick={() => setCurrentPage("fluorescence")}
+            className="
+              relative
+              transition-all
+              hover:text-violet-100
+              after:absolute
+              after:left-0
+              after:-bottom-2
+              after:h-[1px]
+              after:w-0
+              after:bg-violet-300
+              after:transition-all
+              hover:after:w-full
+            "
+          >
+            Fluorescence Detection
           </button>
   
           {/* Resources */}

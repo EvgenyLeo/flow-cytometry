@@ -1,13 +1,13 @@
 import Navigation from "../components/Navigation"
-import { FlowCytometry } from "../components/FlowCytometry"
+import { FluorescenceDetection } from "../components/FluorescenceDetection"
 
-type OpticsPageProps = {
+type FluorescenceDetectionPageProps = {
   setCurrentPage: (page: string) => void
 }
 
-export default function OpticsPage({
+export default function FluorescenceDetectionPage({
   setCurrentPage,
-}: OpticsPageProps) {
+}: FluorescenceDetectionPageProps) {
   return (
     <div className="relative min-h-screen overflow-hidden bg-black text-white">
       {/* Background */}
@@ -59,8 +59,8 @@ export default function OpticsPage({
           </p>
         </div>
 
-        {/* Interactive optics scene */}
-        <FlowCytometry />
+        {/* Interactive fluorescence detection scene */}
+        <FluorescenceDetection />
       </main>
     </div>
   )
