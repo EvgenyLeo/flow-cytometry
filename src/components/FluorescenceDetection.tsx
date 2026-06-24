@@ -15,21 +15,11 @@ const LASER_X0 = 50
 const LASER_X1 = LASER_X0 + 76
 
 const INT_X = CH_CX
-const INT_Y = LASER_Y
 
 const FSC_LENS_X = 548
-const FSC_LENS_Y = LASER_Y
 const FSC_DET_X  = 648
 const FSC_DET_Y  = LASER_Y
 const LASER_X_END = FSC_LENS_X - 34
-
-const SSC_ANGLE = (52 * Math.PI) / 180
-const SSC_LENS_DIST = 128
-const SSC_DET_OFFSET = 82
-const SSC_LENS_X = INT_X + Math.cos(SSC_ANGLE) * SSC_LENS_DIST
-const SSC_LENS_Y = INT_Y + Math.sin(SSC_ANGLE) * SSC_LENS_DIST
-const SSC_DET_X  = SSC_LENS_X + Math.cos(SSC_ANGLE) * SSC_DET_OFFSET
-const SSC_DET_Y  = SSC_LENS_Y + Math.sin(SSC_ANGLE) * SSC_DET_OFFSET
 
 // Fluorescence bench — vertical detector stack (visual layout)
 const FL_BEAM_END = LASER_X_END - 8
@@ -51,7 +41,6 @@ const EDU_Y0      = LASER_Y + 56
 const EDU_TUBES_X = 36
 const EDU_PHENO_X = 172
 
-const LENS_R = 16
 const DETECTOR_APERTURE_R = 5
 const DETECTOR_BODY_R = 14
 const DETECTOR_MODULE_W = 76
@@ -60,7 +49,18 @@ const DETECTOR_MODULE_H = 52
 let _id = 0
 const mkid = () => ++_id
 
+const FL1_COLOR = "#22c55e"
+const FL2_COLOR = "#f97316"
+const DP_COLOR  = "#a855f7"
+const DN_COLOR  = "#64748b"
+const PHOTON_FSC_COUNT = 27
+const PHOTON_FL_COUNT  = 27
+const FL_CONE_HALF     = 0.035
+const FSC_TO_DICHROIC_HALF = 0.07
+
 type Population = "lymphocyte" | "monocyte" | "granulocyte"
+type LymphPhenotype = "helperT" | "cytotoxicT" | "doublePositive" | "doubleNegative"
+type AntibodyKind = "cd4" | "cd8"
 
 const POPULATION_CONFIG: Record<Population, {
   label: string
@@ -108,9 +108,7 @@ const POPULATION_CONFIG: Record<Population, {
   },
 }
 
-const PHOTON_VISUAL_FRAMES = 52
 const ACQUISITION_PAUSE = 18
-const ACQUISITION_DELAY = PHOTON_VISUAL_FRAMES + ACQUISITION_PAUSE
 
 const PLOT_X = 738
 const PLOT_Y = 24
@@ -119,14 +117,22 @@ const PLOT_H = 252
 const PLOT_MARGIN = 30
 const MAX_PLOT_POINTS = 50
 
+type PlotQuadrant = "dn" | "cd4" | "cd8" | "dp"
+
 interface Cell {
   id: number
   cx: number; y: number
   r: number; speed: number
   g: 1 | 2
   population: Population
-  fscPlot: number
-  sscPlot: number
+  phenotype?: LymphPhenotype
+  cd4Stained: boolean
+  cd8Stained: boolean
+  cd4Plot: number
+  cd8Plot: number
+  plotQuadrant: PlotQuadrant
+  emitFl1: boolean
+  emitFl2: boolean
   scattering: boolean; scatterAge: number
 }
 
@@ -134,18 +140,88 @@ interface Photon {
   id: number
   x: number; y: number
   vx: number; vy: number
-  kind: "fsc" | "ssc"
-  phase: "scatter" | "focus"
+  kind: "fsc" | "fl1" | "fl2"
+  phase: "toDichroic" | "vertical" | "focus"
+  eventId: number
   opacity: number; age: number; maxAge: number
 }
 
-interface PlotPoint { id: number; fsc: number; ssc: number }
+interface PlotPoint {
+  id: number
+  cd4: number
+  cd8: number
+  quadrant: PlotQuadrant
+}
 
 interface PendingMeasurement {
-  id: number
-  fsc: number
-  ssc: number
-  releaseFrame: number
+  eventId: number
+  cd4: number
+  cd8: number
+  quadrant: PlotQuadrant
+  needsFl1: boolean
+  needsFl2: boolean
+  fscHit: boolean
+  fl1Hit: boolean
+  fl2Hit: boolean
+  releaseFrame: number | null
+}
+
+interface StainingState {
+  cd4: boolean
+  cd8: boolean
+}
+
+const LYMPH_PHENOTYPE_WEIGHTS: { pheno: LymphPhenotype; weight: number }[] = [
+  { pheno: "helperT", weight: 0.45 },
+  { pheno: "cytotoxicT", weight: 0.35 },
+  { pheno: "doublePositive", weight: 0.10 },
+  { pheno: "doubleNegative", weight: 0.10 },
+]
+
+function pickLymphPhenotype(): LymphPhenotype {
+  const r = Math.random()
+  let acc = 0
+  for (const { pheno, weight } of LYMPH_PHENOTYPE_WEIGHTS) {
+    acc += weight
+    if (r < acc) return pheno
+  }
+  return "doubleNegative"
+}
+
+function computeStaining(
+  pheno: LymphPhenotype,
+  staining: StainingState,
+): { cd4Stained: boolean; cd8Stained: boolean } {
+  const cd4Stained =
+    staining.cd4 && (pheno === "helperT" || pheno === "doublePositive")
+  const cd8Stained =
+    staining.cd8 && (pheno === "cytotoxicT" || pheno === "doublePositive")
+  return { cd4Stained, cd8Stained }
+}
+
+function getPlotQuadrant(
+  cd4Stained: boolean,
+  cd8Stained: boolean,
+): PlotQuadrant {
+  if (cd4Stained && cd8Stained) return "dp"
+  if (cd4Stained) return "cd4"
+  if (cd8Stained) return "cd8"
+  return "dn"
+}
+
+function assignFluorescencePlotCoords(
+  quadrant: PlotQuadrant,
+): { cd4Plot: number; cd8Plot: number } {
+  const jitter = () => (Math.random() - 0.5) * 9
+  const low = () => Math.max(6, Math.min(38, 18 + jitter()))
+  const high = () => Math.max(62, Math.min(94, 76 + jitter()))
+
+  switch (quadrant) {
+    case "dp":  return { cd4Plot: high(), cd8Plot: high() }
+    case "cd4": return { cd4Plot: high(), cd8Plot: low() }
+    case "cd8": return { cd4Plot: low(), cd8Plot: high() }
+    default:    return { cd4Plot: low(), cd8Plot: low() }
+  }
 }
 
 function Defs() {
@@ -250,6 +326,14 @@ function Defs() {
       <radialGradient id="ph-focus-g" cx="50%" cy="50%" r="50%">
         <stop offset="0%"   stopColor="#e8fcff" stopOpacity="1"/>
         <stop offset="100%" stopColor="#67e8f9" stopOpacity="0"/>
+      </radialGradient>
+      <radialGradient id="ph-fl1-g" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"   stopColor="#bbf7d0" stopOpacity="1"/>
+        <stop offset="100%" stopColor="#22c55e" stopOpacity="0"/>
+      </radialGradient>
+      <radialGradient id="ph-fl2-g" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"   stopColor="#fed7aa" stopOpacity="1"/>
+        <stop offset="100%" stopColor="#f97316" stopOpacity="0"/>
       </radialGradient>
 
       <filter id="glow-cyan" x="-120%" y="-120%" width="340%" height="340%">
@@ -594,6 +678,10 @@ function FL1OpticalPath({ enabled, performanceMode }: { enabled: boolean; perfor
         detY={FL1_DET_Y}
         enabled={enabled}
         performanceMode={performanceMode}/>
+      {enabled && (
+        <circle cx={FL1_DET_X + 38} cy={FL1_DET_Y - 10} r={3}
+          fill={FL1_COLOR} opacity={0.9} filter={performanceMode ? undefined : "url(#glow-cyan)"}/>
+      )}
     </g>
   )
 }
@@ -607,6 +695,10 @@ function FL2OpticalPath({ enabled, performanceMode }: { enabled: boolean; perfor
         detY={FL2_DET_Y}
         enabled={enabled}
         performanceMode={performanceMode}/>
+      {enabled && (
+        <circle cx={FL2_DET_X + 38} cy={FL2_DET_Y - 10} r={3}
+          fill={FL2_COLOR} opacity={0.9} filter={performanceMode ? undefined : "url(#glow-cyan)"}/>
+      )}
     </g>
   )
 }
@@ -617,12 +709,20 @@ const StaticLayer = memo(function StaticLayer({
   fl1On,
   fl2On,
   performanceMode,
+  staining,
+  onResetStaining,
+  draggingAb,
+  onAbPointerDown,
 }: {
   laserOn: boolean
   fscOn: boolean
   fl1On: boolean
   fl2On: boolean
   performanceMode: boolean
+  staining: StainingState
+  onResetStaining: () => void
+  draggingAb: AntibodyKind | null
+  onAbPointerDown: (ab: AntibodyKind, e: React.PointerEvent) => void
 }) {
   return (
     <>
@@ -630,7 +730,12 @@ const StaticLayer = memo(function StaticLayer({
       <SceneGrid/>
       <FlowChannel/>
       <LaserSource enabled={laserOn} performanceMode={performanceMode}/>
-      <InstrumentEducationArea/>
+      <InstrumentEducationArea
+        staining={staining}
+        draggingAb={draggingAb}
+        onAbPointerDown={onAbPointerDown}
+        onResetStaining={onResetStaining}
+      />
       <FSCOpticalPath enabled={fscOn} performanceMode={performanceMode}/>
       <FluorescenceMirror enabled={fscOn} performanceMode={performanceMode} x={FSC_MIRROR_X} y={FSC_MIRROR_Y} angle={45}/>
       <FluorescenceMirror enabled={laserOn} performanceMode={performanceMode} x={MIRROR1_X} y={MIRROR1_Y} angle={45}/>
@@ -653,6 +758,8 @@ function DynamicLayer({
   cells,
   photons,
   plotPoints,
+  draggingAb,
+  dragOffset,
 }: {
   laserOn: boolean
   cellsOn: boolean
@@ -661,6 +768,8 @@ function DynamicLayer({
   cells: Cell[]
   photons: Photon[]
   plotPoints: PlotPoint[]
+  draggingAb: AntibodyKind | null
+  dragOffset: { x: number; y: number }
 }) {
   const activeCell = cellsOn
     ? cells.find(
@@ -676,7 +785,7 @@ function DynamicLayer({
         enabled={laserOn}
         activeCell={activeCell}
         performanceMode={performanceMode}/>
-      {photons.filter(p => p.kind !== "ssc").map(p => (
+      {photons.map(p => (
         <PhotonSVG key={p.id} p={p} performanceMode={performanceMode}/>
       ))}
       <g clipPath="url(#channel-clip)">
@@ -685,12 +794,28 @@ function DynamicLayer({
         ))}
       </g>
       {plotOn && <FluorescencePlot points={plotPoints}/>}
+      {draggingAb === "cd4" && (
+        <CompactTubeSVG
+          x={CD4_TUBE_ORIGIN.x + dragOffset.x}
+          y={CD4_TUBE_ORIGIN.y + dragOffset.y}
+          label="Anti-CD4 (FITC)" liquidColor={FL1_COLOR} capColor={FL1_COLOR}
+          isDragging
+        />
+      )}
+      {draggingAb === "cd8" && (
+        <CompactTubeSVG
+          x={CD8_TUBE_ORIGIN.x + dragOffset.x}
+          y={CD8_TUBE_ORIGIN.y + dragOffset.y}
+          label="Anti-CD8 (PE)" liquidColor={FL2_COLOR} capColor={FL2_COLOR}
+          isDragging
+        />
+      )}
     </>
   )
 }
 
 function CellSVG({ cell }: { cell: Cell }) {
-  const { cx, y, r, g } = cell
+  const { cx, y, r, g, cd4Stained, cd8Stained } = cell
   return (
     <g transform={`translate(${cx},${y})`} filter="url(#glow-cell)">
       <circle r={r}
@@ -707,23 +832,44 @@ function CellSVG({ cell }: { cell: Cell }) {
       <ellipse rx={r * 0.57} ry={r * 0.23}
         cx={-r * 0.08} cy={-r * 0.60}
         fill="#f0f9ff" opacity="0.16"/>
+      {cd4Stained && (
+        <circle cx={r * 0.48} cy={-r * 0.22} r={r * 0.30}
+          fill={FL1_COLOR} stroke="#052e16" strokeWidth="0.5" opacity="1"
+          filter="url(#glow-ph)"/>
+      )}
+      {cd8Stained && (
+        <circle cx={-r * 0.44} cy={r * 0.22} r={r * 0.30}
+          fill={FL2_COLOR} stroke="#431407" strokeWidth="0.5" opacity="1"
+          filter="url(#glow-ph)"/>
+      )}
     </g>
   )
 }
 
 function PhotonSVG({ p, performanceMode }: { p: Photon; performanceMode: boolean }) {
-  const r = p.phase === "focus" ? 1.25 : 1.1
-  const grad = p.phase === "focus" ? "url(#ph-focus-g)" : "url(#ph-scatter-g)"
-  const core = p.phase === "focus" ? "#e0fcff" : "#7ee8ff"
-  const trailLen = p.phase === "scatter" ? 10 : 5
+  const r = p.phase === "focus" ? 1.25 : 1.05
+  const grad =
+    p.kind === "fl1" ? "url(#ph-fl1-g)"
+    : p.kind === "fl2" ? "url(#ph-fl2-g)"
+    : p.phase === "focus" ? "url(#ph-focus-g)" : "url(#ph-scatter-g)"
+  const core =
+    p.kind === "fl1" ? FL1_COLOR
+    : p.kind === "fl2" ? FL2_COLOR
+    : p.phase === "focus" ? "#e0fcff" : "#7ee8ff"
+  const trailColor =
+    p.kind === "fl1" ? FL1_COLOR
+    : p.kind === "fl2" ? FL2_COLOR
+    : "#22d3ee"
+  const trailLen = p.phase === "focus" ? 6 : 12
   const photonGlow = performanceMode ? undefined : "url(#glow-ph)"
+  const showTrail = p.phase !== "focus"
   return (
     <g opacity={p.opacity} filter={photonGlow}>
-      {p.phase === "scatter" && (
+      {showTrail && (
         <line
-          x1={p.x - p.vx * trailLen * 0.35} y1={p.y - p.vy * trailLen * 0.35}
+          x1={p.x - p.vx * trailLen * 0.4} y1={p.y - p.vy * trailLen * 0.4}
           x2={p.x} y2={p.y}
-          stroke="#22d3ee" strokeWidth="0.6" opacity={0.28}
+          stroke={trailColor} strokeWidth={p.kind === "fsc" ? "0.6" : "0.75"} opacity={0.38}
         />
       )}
       <circle cx={p.x} cy={p.y} r={r * 2}
@@ -754,14 +900,14 @@ function FluorescenceAnnotations({
 
       {fl1Enabled && (
         <text x={FL1_DET_X + 44} y={FL1_DET_Y + 4} textAnchor="start"
-          fill="#0d5a6e" fontSize="7.5" fontWeight="600">
+          fill={FL1_COLOR} fontSize="7.5" fontWeight="600">
           FL1 (FITC)
         </text>
       )}
 
       {fl2Enabled && (
         <text x={FL2_DET_X + 44} y={FL2_DET_Y + 4} textAnchor="start"
-          fill="#0d5a6e" fontSize="7.5" fontWeight="600">
+          fill={FL2_COLOR} fontSize="7.5" fontWeight="600">
           FL2 (PE)
         </text>
       )}
@@ -782,9 +928,11 @@ function FluorescencePlot({ points }: { points: PlotPoint[] }) {
   const iy = PLOT_Y + PLOT_MARGIN
   const iw = PLOT_W - PLOT_MARGIN * 2
   const ih = PLOT_H - PLOT_MARGIN * 2
+  const midX = ix + iw / 2
+  const midY = iy + ih / 2
 
-  const toX = (fsc: number) => ix + (fsc / 100) * iw
-  const toY = (ssc: number) => iy + ih - (ssc / 100) * ih
+  const toX = (cd4: number) => ix + (cd4 / 100) * iw
+  const toY = (cd8: number) => iy + ih - (cd8 / 100) * ih
 
   return (
     <g>
@@ -794,6 +942,12 @@ function FluorescencePlot({ points }: { points: PlotPoint[] }) {
       <rect
         x={ix} y={iy} width={iw} height={ih}
         fill="#fafbfc" stroke="#d8dce2" strokeWidth="0.6"/>
+
+      {/* quadrant dividers */}
+      <line x1={midX} y1={iy} x2={midX} y2={iy + ih}
+        stroke="#b8bcc4" strokeWidth="0.8" strokeDasharray="4 3" opacity="0.7"/>
+      <line x1={ix} y1={midY} x2={ix + iw} y2={midY}
+        stroke="#b8bcc4" strokeWidth="0.8" strokeDasharray="4 3" opacity="0.7"/>
 
       {/* axis ticks */}
       {[25, 50, 75].map(v => (
@@ -805,16 +959,31 @@ function FluorescencePlot({ points }: { points: PlotPoint[] }) {
         </g>
       ))}
 
-      {points.map(pt => (
-        <circle
-          key={pt.id}
-          cx={toX(pt.fsc)}
-          cy={toY(pt.ssc)}
-          r={2.2}
-          fill="#2a2f36"
-          opacity={0.82}
-        />
-      ))}
+      {/* quadrant labels */}
+      <text x={ix + 8} y={iy + 12} fill="#94a3b8" fontSize="6.5" fontFamily="monospace">CD8+</text>
+      <text x={ix + iw - 8} y={iy + 12} textAnchor="end" fill="#94a3b8" fontSize="6.5" fontFamily="monospace">DP</text>
+      <text x={ix + 8} y={iy + ih - 6} fill="#94a3b8" fontSize="6.5" fontFamily="monospace">DN</text>
+      <text x={ix + iw - 8} y={iy + ih - 6} textAnchor="end" fill="#94a3b8" fontSize="6.5" fontFamily="monospace">CD4+</text>
+
+      {points.map(pt => {
+        const cx = toX(pt.cd4)
+        const cy = toY(pt.cd8)
+        const fill =
+          pt.quadrant === "dp" ? DP_COLOR
+          : pt.quadrant === "cd4" ? FL1_COLOR
+          : pt.quadrant === "cd8" ? FL2_COLOR
+          : DN_COLOR
+        return (
+          <circle
+            key={pt.id}
+            cx={cx}
+            cy={cy}
+            r={2.2}
+            fill={fill}
+            opacity={0.82}
+          />
+        )
+      })}
 
       <text
         x={PLOT_X + PLOT_W / 2} y={PLOT_Y + PLOT_H - 6}
@@ -833,15 +1002,28 @@ function FluorescencePlot({ points }: { points: PlotPoint[] }) {
   )
 }
 
+const TUBE_H = 34
+const SAMPLE_TUBE_ORIGIN = { x: EDU_TUBES_X + 10, y: EDU_Y0 + 22 }
+const CD4_TUBE_ORIGIN = { x: EDU_TUBES_X + 10, y: EDU_Y0 + 22 + 38 }
+const CD8_TUBE_ORIGIN = { x: EDU_TUBES_X + 10, y: EDU_Y0 + 22 + 76 }
+
 function CompactTubeSVG({
   x, y, label, liquidColor, capColor, showCells = false,
+  draggable = false, onPointerDown, isDragging = false,
 }: {
   x: number; y: number; label: string; liquidColor: string; capColor?: string
   showCells?: boolean
+  draggable?: boolean
+  onPointerDown?: (e: React.PointerEvent) => void
+  isDragging?: boolean
 }) {
   const cap = capColor ?? "#1a3048"
   return (
-    <g transform={`translate(${x},${y})`}>
+    <g
+      transform={`translate(${x},${y})`}
+      style={{ cursor: draggable ? "grab" : undefined }}
+      onPointerDown={onPointerDown}
+      opacity={isDragging ? 0.85 : 1}>
       <rect x={7} y={2} width={12} height={4} rx={1} fill={cap} stroke="#2a4560" strokeWidth="0.4"/>
       <rect x={5} y={6} width={16} height={28} rx={3.5} fill="#07111a" stroke="#2a4560" strokeWidth="0.5"/>
       <rect x={7} y={showCells ? 15 : 17} width={12} height={showCells ? 14 : 12} rx={1.5} fill={liquidColor} opacity="0.8"/>
@@ -859,38 +1041,116 @@ function CompactTubeSVG({
 }
 
 function CompactPhenotypeRowSVG({
-  x, y, title, markers, dotColor,
+  x, y, title, markers, pheno, staining,
 }: {
-  x: number; y: number; title: string; markers: string; dotColor: string
+  x: number; y: number; title: string; markers: string
+  pheno: LymphPhenotype
+  staining: StainingState
 }) {
+  const highlighted =
+    (staining.cd4 && (pheno === "helperT" || pheno === "doublePositive")) ||
+    (staining.cd8 && (pheno === "cytotoxicT" || pheno === "doublePositive"))
+
+  const showCd4 =
+    staining.cd4 && (pheno === "helperT" || pheno === "doublePositive")
+  const showCd8 =
+    staining.cd8 && (pheno === "cytotoxicT" || pheno === "doublePositive")
+
+  const baseDot =
+    pheno === "doubleNegative" ? DN_COLOR
+    : pheno === "helperT" ? FL1_COLOR
+    : pheno === "cytotoxicT" ? FL2_COLOR
+    : "#64748b"
+
   return (
-    <g transform={`translate(${x},${y})`}>
-      <circle cx={7} cy={10} r={4} fill={dotColor} opacity="0.85"/>
-      <text x={16} y={9} fill="#62b4d0" fontSize="7.5" fontFamily="monospace" fontWeight="600">
+    <g transform={`translate(${x},${y})`} opacity={highlighted ? 1 : 0.55}>
+      <rect x={-2} y={0} width={168} height={24} rx={4}
+        fill={highlighted ? "#0a2030" : "transparent"}
+        stroke={highlighted ? "#2a6080" : "transparent"}
+        strokeWidth="0.6"/>
+      <circle cx={7} cy={10} r={4} fill={baseDot} opacity={highlighted ? 0.95 : 0.45}/>
+      {showCd4 && (
+        <circle cx={15} cy={5} r={2.8} fill={FL1_COLOR} stroke="#052e16" strokeWidth="0.35"/>
+      )}
+      {showCd8 && (
+        <circle cx={15} cy={15} r={2.8} fill={FL2_COLOR} stroke="#431407" strokeWidth="0.35"/>
+      )}
+      <text x={22} y={9} fill={highlighted ? "#62b4d0" : "#3a6078"} fontSize="7.5" fontFamily="monospace" fontWeight="600">
         {title}
       </text>
-      <text x={16} y={18} fill="#284860" fontSize="7" fontFamily="monospace">
+      <text x={22} y={18} fill="#284860" fontSize="7" fontFamily="monospace">
         {markers}
       </text>
     </g>
   )
 }
 
-function InstrumentEducationArea() {
-  const tubesY = EDU_Y0 + 22
+function InstrumentEducationArea({
+  staining,
+  draggingAb,
+  onAbPointerDown,
+  onResetStaining,
+}: {
+  staining: StainingState
+  draggingAb: AntibodyKind | null
+  onAbPointerDown: (ab: AntibodyKind, e: React.PointerEvent) => void
+  onResetStaining: () => void
+}) {
   const phenoY = EDU_Y0 + 22
+
   return (
     <g fontFamily="monospace">
       {/* Tubes & Dyes — left panel */}
       <rect
-        x={EDU_TUBES_X} y={EDU_Y0} width={128} height={136} rx={8}
+        x={EDU_TUBES_X} y={EDU_Y0} width={128} height={178} rx={8}
         fill="#040a12" stroke="#122840" strokeWidth="0.8" opacity="0.88"/>
       <text x={EDU_TUBES_X + 10} y={EDU_Y0 + 16} fill="#3a8ab0" fontSize="8" fontWeight="600" letterSpacing="0.12em">
         TUBES &amp; DYES
       </text>
-      <CompactTubeSVG x={EDU_TUBES_X + 10} y={tubesY} label="Sample Tube" liquidColor="#1a5a8a" capColor="#6b4fa0" showCells/>
-      <CompactTubeSVG x={EDU_TUBES_X + 10} y={tubesY + 38} label="Anti-CD4 (FITC)" liquidColor="#22c55e" capColor="#22c55e"/>
-      <CompactTubeSVG x={EDU_TUBES_X + 10} y={tubesY + 76} label="Anti-CD8 (PE)" liquidColor="#ef4444" capColor="#ef4444"/>
+      <CompactTubeSVG x={SAMPLE_TUBE_ORIGIN.x} y={SAMPLE_TUBE_ORIGIN.y} label="Sample Tube" liquidColor="#1a5a8a" capColor="#6b4fa0" showCells/>
+      {/* drop target highlight when dragging */}
+      {draggingAb && (
+        <rect
+          x={SAMPLE_TUBE_ORIGIN.x + 4} y={SAMPLE_TUBE_ORIGIN.y + 4}
+          width={90} height={TUBE_H + 4} rx={6}
+          fill="none" stroke="#6b4fa0" strokeWidth="1" strokeDasharray="3 2" opacity="0.7"/>
+      )}
+      {draggingAb !== "cd4" && (
+        <CompactTubeSVG
+          x={CD4_TUBE_ORIGIN.x} y={CD4_TUBE_ORIGIN.y}
+          label="Anti-CD4 (FITC)" liquidColor={FL1_COLOR} capColor={FL1_COLOR}
+          draggable
+          onPointerDown={e => onAbPointerDown("cd4", e)}
+        />
+      )}
+      {draggingAb !== "cd8" && (
+        <CompactTubeSVG
+          x={CD8_TUBE_ORIGIN.x} y={CD8_TUBE_ORIGIN.y}
+          label="Anti-CD8 (PE)" liquidColor={FL2_COLOR} capColor={FL2_COLOR}
+          draggable
+          onPointerDown={e => onAbPointerDown("cd8", e)}
+        />
+      )}
+      {staining.cd4 && (
+        <text x={EDU_TUBES_X + 10} y={EDU_Y0 + 148} fill={FL1_COLOR} fontSize="6.5" fontWeight="600">
+          CD4 staining active
+        </text>
+      )}
+      {staining.cd8 && (
+        <text x={EDU_TUBES_X + 10} y={EDU_Y0 + (staining.cd4 ? 158 : 148)} fill={FL2_COLOR} fontSize="6.5" fontWeight="600">
+          CD8 staining active
+        </text>
+      )}
+      <g
+        transform={`translate(${EDU_TUBES_X + 10}, ${EDU_Y0 + 162})`}
+        style={{ cursor: "pointer" }}
+        onClick={onResetStaining}>
+        <rect x={0} y={0} width={108} height={16} rx={3}
+          fill="#0a1828" stroke="#2a4560" strokeWidth="0.6"/>
+        <text x={54} y={11} textAnchor="middle" fill="#5a7890" fontSize="7" fontWeight="600" letterSpacing="0.08em">
+          RESET STAINING
+        </text>
+      </g>
 
       {/* Cell Phenotype Panel — right panel */}
       <rect
@@ -899,10 +1159,10 @@ function InstrumentEducationArea() {
       <text x={EDU_PHENO_X + 10} y={EDU_Y0 + 16} fill="#3a8ab0" fontSize="8" fontWeight="600" letterSpacing="0.1em">
         CELL PHENOTYPE PANEL
       </text>
-      <CompactPhenotypeRowSVG x={EDU_PHENO_X + 8} y={phenoY} title="Helper T Cell" markers="CD4+ CD8−" dotColor="#22c55e"/>
-      <CompactPhenotypeRowSVG x={EDU_PHENO_X + 8} y={phenoY + 28} title="Cytotoxic T Cell" markers="CD4− CD8+" dotColor="#f97316"/>
-      <CompactPhenotypeRowSVG x={EDU_PHENO_X + 8} y={phenoY + 56} title="Double Positive T Cell" markers="CD4+ CD8+" dotColor="#a855f7"/>
-      <CompactPhenotypeRowSVG x={EDU_PHENO_X + 8} y={phenoY + 84} title="Double Negative T Cell" markers="CD4− CD8−" dotColor="#64748b"/>
+      <CompactPhenotypeRowSVG x={EDU_PHENO_X + 8} y={phenoY} title="Helper T Cell" markers="CD4+ CD8−" pheno="helperT" staining={staining}/>
+      <CompactPhenotypeRowSVG x={EDU_PHENO_X + 8} y={phenoY + 28} title="Cytotoxic T Cell" markers="CD4− CD8+" pheno="cytotoxicT" staining={staining}/>
+      <CompactPhenotypeRowSVG x={EDU_PHENO_X + 8} y={phenoY + 56} title="Double Positive T Cell" markers="CD4+ CD8+" pheno="doublePositive" staining={staining}/>
+      <CompactPhenotypeRowSVG x={EDU_PHENO_X + 8} y={phenoY + 84} title="Double Negative T Cell" markers="CD4− CD8−" pheno="doubleNegative" staining={staining}/>
     </g>
   )
 }
@@ -980,22 +1240,14 @@ function pickPopulation(
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
-function assignPlotCoords(pop: Population): { fscPlot: number; sscPlot: number } {
-  const cfg = POPULATION_CONFIG[pop]
-  const jitter = () => (Math.random() - 0.5) * 2 * cfg.plotJitter
-  return {
-    fscPlot: Math.max(4, Math.min(96, cfg.fscCenter + jitter())),
-    sscPlot: Math.max(4, Math.min(96, cfg.sscCenter + jitter())),
-  }
-}
-
 function focusPhotonToward(
   p: Photon, targetX: number, targetY: number,
+  speedBoost = 1, spreadHalf = 0.04,
 ): Photon {
   const dx = targetX - p.x
   const dy = targetY - p.y
-  const spd = Math.hypot(p.vx, p.vy)
-  const spread = (Math.random() - 0.5) * 0.12
+  const spd = Math.hypot(p.vx, p.vy) * speedBoost
+  const spread = (Math.random() - 0.5) * 2 * spreadHalf
   const baseAng = Math.atan2(dy, dx)
   const ang = baseAng + spread
   return {
@@ -1006,40 +1258,151 @@ function focusPhotonToward(
   }
 }
 
-function tryCollectPhoton(p: Photon, fscOn: boolean, sscOn: boolean): Photon {
-  if (p.phase !== "scatter") return p
+function routePhoton(
+  p: Photon,
+  fscOn: boolean,
+  fl1On: boolean,
+  fl2On: boolean,
+): Photon {
+  if (p.phase === "toDichroic") {
+    const reachedDichroic =
+      p.x >= FSC_MIRROR_X - 3 &&
+      p.x - p.vx < FSC_MIRROR_X + 2 &&
+      Math.abs(p.y - FSC_MIRROR_Y) <= 10
 
-  if (p.kind === "fsc" && fscOn && p.vx > 0.5) {
-    const crossed = p.x >= FSC_LENS_X - 4 && p.x - p.vx < FSC_LENS_X + 2
-    if (crossed && Math.abs(p.y - FSC_LENS_Y) <= LENS_R) {
-      return focusPhotonToward(p, FSC_DET_X, FSC_DET_Y)
+    if (!reachedDichroic) return p
+
+    if (p.kind === "fsc" && fscOn) {
+      return focusPhotonToward(p, FSC_DET_X, FSC_DET_Y, 1, 0.05)
+    }
+
+    if (p.kind === "fl1" && !fl1On && fscOn) {
+      return focusPhotonToward(p, FSC_DET_X, FSC_DET_Y, 1, 0.05)
+    }
+
+    if (p.kind === "fl2" && !fl2On && fscOn) {
+      return focusPhotonToward(p, FSC_DET_X, FSC_DET_Y, 1, 0.05)
+    }
+
+    if ((p.kind === "fl1" && fl1On) || (p.kind === "fl2" && fl2On)) {
+
+      const targetX =    
+        p.kind === "fl1"   
+          ? MIRROR1_X    
+          : MIRROR2_X    
+
+      const targetY =    
+        p.kind === "fl1"   
+          ? MIRROR1_Y    
+          : MIRROR2_Y
+              
+      return focusPhotonToward(   
+        p,   
+        targetX,    
+        targetY,    
+        1.06,    
+        0.015
+      )
+    }
+
+    return p
+  }
+
+  if (p.phase === "focus" && p.vy > 0.2) {
+    if (p.kind === "fl1" && fl1On) {
+      const crossed =
+        p.y >= MIRROR1_Y - 4 && p.y - p.vy < MIRROR1_Y + 2 &&
+        Math.abs(p.x - MIRROR1_X) <= 12
+      if (crossed) {
+        return focusPhotonToward(p, FL1_DET_X, FL1_DET_Y, 1.06, 0.03)
+      }
+    }
+
+    if (p.kind === "fl2" && fl2On) {
+      const crossed =
+        p.y >= MIRROR2_Y - 4 && p.y - p.vy < MIRROR2_Y + 2 &&
+        Math.abs(p.x - MIRROR2_X) <= 12
+      if (crossed) {
+        return focusPhotonToward(p, FL2_DET_X, FL2_DET_Y, 1.06, 0.03)
+      }
     }
   }
 
-  if (p.kind === "ssc" && sscOn) {
-    const prevDist = Math.hypot(p.x - p.vx - SSC_LENS_X, p.y - p.vy - SSC_LENS_Y)
-    const dist = Math.hypot(p.x - SSC_LENS_X, p.y - SSC_LENS_Y)
-    const approaching = dist < prevDist
-    if (approaching && dist <= LENS_R + 2) {
-      return focusPhotonToward(p, SSC_DET_X, SSC_DET_Y)
+  if (p.phase === "vertical") {
+    if (p.kind === "fl1" && fl1On) {
+      const crossed =
+        p.y >= MIRROR1_Y - 4 && p.y - p.vy < MIRROR1_Y + 2 &&
+        Math.abs(p.x - MIRROR1_X) <= 12
+      if (crossed) {
+        return focusPhotonToward(p, FL1_DET_X, FL1_DET_Y, 1.06, 0.03)
+      }
     }
+
+    if (p.kind === "fl2" && fl2On) {
+      const crossed =
+        p.y >= MIRROR2_Y - 4 && p.y - p.vy < MIRROR2_Y + 2 &&
+        Math.abs(p.x - MIRROR2_X) <= 12
+      if (crossed) {
+        return focusPhotonToward(p, FL2_DET_X, FL2_DET_Y, 1.06, 0.03)
+      }
+    }
+
+    return p
   }
 
   return p
 }
 
-function absorbPhotonIfInside(p: Photon): Photon | null {
-  if (p.phase !== "focus") return p
+function absorbPhotonIfInside(p: Photon): { photon: Photon | null; detected: boolean } {
+  if (p.phase !== "focus") return { photon: p, detected: false }
 
-  const detX = p.kind === "fsc" ? FSC_DET_X : SSC_DET_X
-  const detY = p.kind === "fsc" ? FSC_DET_Y : SSC_DET_Y
+  const targets: Record<Photon["kind"], { x: number; y: number }> = {
+    fsc: { x: FSC_DET_X, y: FSC_DET_Y },
+    fl1: { x: FL1_DET_X, y: FL1_DET_Y },
+    fl2: { x: FL2_DET_X, y: FL2_DET_Y },
+  }
+  const { x: detX, y: detY } = targets[p.kind]
   const inside = Math.hypot(p.x - detX, p.y - detY) < DETECTOR_BODY_R * 0.85
 
-  if (!inside) return p
+  if (!inside) return { photon: p, detected: false }
 
   const nextOpacity = p.opacity * 0.72
-  if (nextOpacity < 0.06) return null
-  return { ...p, opacity: nextOpacity }
+  if (nextOpacity < 0.06) return { photon: null, detected: true }
+  return { photon: { ...p, opacity: nextOpacity }, detected: false }
+}
+
+function measurementReady(m: PendingMeasurement): boolean {
+  if (!m.fscHit) return false
+  if (m.needsFl1 && !m.fl1Hit) return false
+  if (m.needsFl2 && !m.fl2Hit) return false
+  return true
+}
+
+function applyDetectorHit(
+  pending: PendingMeasurement[],
+  eventId: number,
+  kind: Photon["kind"],
+  frame: number,
+): PendingMeasurement[] {
+  return pending.map(m => {
+    if (m.eventId !== eventId) return m
+    const updated = { ...m }
+    if (kind === "fsc") updated.fscHit = true
+    if (kind === "fl1") updated.fl1Hit = true
+    if (kind === "fl2") updated.fl2Hit = true
+    if (updated.releaseFrame === null && measurementReady(updated)) {
+      updated.releaseFrame = frame + ACQUISITION_PAUSE
+    }
+    return updated
+  })
+}
+
+function isOverSampleTube(svgX: number, svgY: number): boolean {
+  const left = SAMPLE_TUBE_ORIGIN.x + 4
+  const top = SAMPLE_TUBE_ORIGIN.y + 4
+  const right = left + 90
+  const bottom = top + TUBE_H + 4
+  return svgX >= left && svgX <= right && svgY >= top && svgY <= bottom
 }
 
 function PerformanceStatsOverlay({
@@ -1075,22 +1438,30 @@ export function FluorescenceDetection() {
   const [performanceMode, setPerformanceMode] = useState(false)
   const [showPerfStats, setShowPerfStats] = useState(false)
   const [perfStats, setPerfStats] = useState({ fps: 0, cells: 0, photons: 0 })
+  const [staining, setStaining] = useState<StainingState>({ cd4: false, cd8: false })
+  const [draggingAb, setDraggingAb] = useState<AntibodyKind | null>(null)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
 
   const rCells = useRef(cellsOn)
   const rLaser = useRef(laserOn)
   const rFsc   = useRef(fscOn)
-  const rSsc   = useRef(false)
+  const rFl1   = useRef(fl1On)
+  const rFl2   = useRef(fl2On)
   const rLymph = useRef(lymphOn)
   const rMono  = useRef(monoOn)
   const rGran  = useRef(granOn)
   const rPlot  = useRef(plotOn)
+  const rStaining = useRef(staining)
   useEffect(() => { rCells.current = cellsOn }, [cellsOn])
   useEffect(() => { rLaser.current = laserOn }, [laserOn])
   useEffect(() => { rFsc.current   = fscOn   }, [fscOn])
+  useEffect(() => { rFl1.current   = fl1On   }, [fl1On])
+  useEffect(() => { rFl2.current   = fl2On   }, [fl2On])
   useEffect(() => { rLymph.current = lymphOn }, [lymphOn])
   useEffect(() => { rMono.current  = monoOn  }, [monoOn])
   useEffect(() => { rGran.current  = granOn  }, [granOn])
   useEffect(() => { rPlot.current  = plotOn  }, [plotOn])
+  useEffect(() => { rStaining.current = staining }, [staining])
 
   const cells      = useRef<Cell[]>([])
   const photons    = useRef<Photon[]>([])
@@ -1101,6 +1472,8 @@ export function FluorescenceDetection() {
   const rShowPerfStats = useRef(showPerfStats)
   const perfFrameCount = useRef(0)
   const perfLastSample = useRef(performance.now())
+  const dragStart = useRef({ x: 0, y: 0 })
+  const svgRef = useRef<SVGSVGElement>(null)
 
   useEffect(() => { rShowPerfStats.current = showPerfStats }, [showPerfStats])
   useEffect(() => {
@@ -1109,6 +1482,31 @@ export function FluorescenceDetection() {
       perfLastSample.current = performance.now()
     }
   }, [showPerfStats])
+
+  const resetStaining = useCallback(() => {
+    setStaining({ cd4: false, cd8: false })
+    rStaining.current = { cd4: false, cd8: false }
+    bump(n => n + 1)
+  }, [])
+
+  const applyAntibody = useCallback((ab: AntibodyKind) => {
+    setStaining(prev => {
+      const next = ab === "cd4" ? { ...prev, cd4: true } : { ...prev, cd8: true }
+      rStaining.current = next
+      return next
+    })
+    bump(n => n + 1)
+  }, [])
+
+  const handleCellsChange = useCallback((on: boolean) => {
+    setCellsOn(on)
+    if (!on) resetStaining()
+  }, [resetStaining])
+
+  const handleLymphChange = useCallback((on: boolean) => {
+    setLymphOn(on)
+    if (!on) resetStaining()
+  }, [resetStaining])
 
   const handlePlotChange = useCallback((on: boolean) => {
     setPlotOn(on)
@@ -1124,12 +1522,77 @@ export function FluorescenceDetection() {
     bump(n => n + 1)
   }, [])
 
+  const clientToSvg = useCallback((clientX: number, clientY: number) => {
+    const svg = svgRef.current
+    if (!svg) return { x: 0, y: 0 }
+    const pt = svg.createSVGPoint()
+    pt.x = clientX
+    pt.y = clientY
+    const ctm = svg.getScreenCTM()
+    if (!ctm) return { x: 0, y: 0 }
+    const svgPt = pt.matrixTransform(ctm.inverse())
+    return { x: svgPt.x, y: svgPt.y }
+  }, [])
+
+  const handleAbPointerDown = useCallback((ab: AntibodyKind, e: React.PointerEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const origin = ab === "cd4" ? CD4_TUBE_ORIGIN : CD8_TUBE_ORIGIN
+    const svgPt = clientToSvg(e.clientX, e.clientY)
+    dragStart.current = { x: svgPt.x - origin.x, y: svgPt.y - origin.y }
+    setDraggingAb(ab)
+    setDragOffset({ x: 0, y: 0 })
+  }, [clientToSvg])
+
+  useEffect(() => {
+    if (!draggingAb) return
+
+    const handleMove = (e: PointerEvent) => {
+      const origin = draggingAb === "cd4" ? CD4_TUBE_ORIGIN : CD8_TUBE_ORIGIN
+      const svgPt = clientToSvg(e.clientX, e.clientY)
+      setDragOffset({
+        x: svgPt.x - origin.x - dragStart.current.x,
+        y: svgPt.y - origin.y - dragStart.current.y,
+      })
+    }
+
+    const handleUp = (e: PointerEvent) => {
+      const svgPt = clientToSvg(e.clientX, e.clientY)
+      if (isOverSampleTube(svgPt.x, svgPt.y)) {
+        applyAntibody(draggingAb)
+      }
+      setDraggingAb(null)
+      setDragOffset({ x: 0, y: 0 })
+    }
+
+    window.addEventListener("pointermove", handleMove)
+    window.addEventListener("pointerup", handleUp)
+    return () => {
+      window.removeEventListener("pointermove", handleMove)
+      window.removeEventListener("pointerup", handleUp)
+    }
+  }, [draggingAb, clientToSvg, applyAntibody])
+
   const spawnCell = useCallback((startY = -26) => {
     const pop = pickPopulation(rLymph.current, rMono.current, rGran.current)
     if (!pop) return
 
     const cfg = POPULATION_CONFIG[pop]
-    const { fscPlot, sscPlot } = assignPlotCoords(pop)
+    const stain = rStaining.current
+
+    let phenotype: LymphPhenotype | undefined
+    let cd4Stained = false
+    let cd8Stained = false
+
+    if (pop === "lymphocyte") {
+      phenotype = pickLymphPhenotype()
+      const stainingResult = computeStaining(phenotype, stain)
+      cd4Stained = stainingResult.cd4Stained
+      cd8Stained = stainingResult.cd8Stained
+    }
+
+    const plotQuadrant = getPlotQuadrant(cd4Stained, cd8Stained)
+    const { cd4Plot, cd8Plot } = assignFluorescencePlotCoords(plotQuadrant)
 
     cells.current.push({
       id: mkid(),
@@ -1139,56 +1602,64 @@ export function FluorescenceDetection() {
       speed: 1.8,
       g: cfg.g,
       population: pop,
-      fscPlot,
-      sscPlot,
+      phenotype,
+      cd4Stained,
+      cd8Stained,
+      cd4Plot,
+      cd8Plot,
+      plotQuadrant,
+      emitFl1: cd4Stained,
+      emitFl2: cd8Stained,
       scattering: false,
       scatterAge: 0,
     })
   }, [])
 
-  const emitPhotons = useCallback((ix: number, iy: number, pop: Population) => {
-    const cfg = POPULATION_CONFIG[pop]
-    const nFsc = 32
-    const nSsc = 28
-    const sscBase = Math.atan2(SSC_LENS_Y - iy, SSC_LENS_X - ix)
+  const emitPhotons = useCallback((cell: Cell, eventId: number) => {
+    const ix = cell.cx
+    const iy = LASER_Y
+    const dichroicAng = Math.atan2(FSC_MIRROR_Y - iy, FSC_MIRROR_X - ix)
 
-    for (let i = 0; i < nFsc; i++) {
-      const spd = 4.2 + Math.random() * 2.4
-      const miss = Math.random() < 0.38
-      const half = miss ? cfg.fscConeHalf * 2.4 : cfg.fscConeHalf
-      const ang = (Math.random() - 0.5) * 2 * half
+    for (let i = 0; i < PHOTON_FSC_COUNT; i++) {
+      const spd = 4.4 + Math.random() * 1.8
+      const ang = dichroicAng + (Math.random() - 0.5) * 2 * FSC_TO_DICHROIC_HALF
       photons.current.push({
         id: mkid(),
-        x: ix + Math.random() * 2 - 1,
-        y: iy + Math.random() * 2 - 1,
-        vx: Math.cos(ang) * spd,
-        vy: Math.sin(ang) * spd * (0.55 + Math.random() * 0.35),
-        kind: "fsc",
-        phase: "scatter",
-        opacity: 0.7 + Math.random() * 0.25,
-        age: 0,
-        maxAge: 52 + Math.random() * 18,
-      })
-    }
-
-    for (let i = 0; i < nSsc; i++) {
-      const spd = 3.8 + Math.random() * 2.2
-      const miss = Math.random() < 0.40
-      const half = miss ? cfg.sscConeHalf * 2.2 : cfg.sscConeHalf
-      const ang = sscBase + (Math.random() - 0.5) * 2 * half
-      photons.current.push({
-        id: mkid(),
-        x: ix + Math.random() * 2 - 1,
-        y: iy + Math.random() * 2 - 1,
+        x: ix + (Math.random() - 0.5) * 1.2,
+        y: iy + (Math.random() - 0.5) * 1.2,
         vx: Math.cos(ang) * spd,
         vy: Math.sin(ang) * spd,
-        kind: "ssc",
-        phase: "scatter",
-        opacity: 0.65 + Math.random() * 0.28,
+        kind: "fsc",
+        phase: "toDichroic",
+        eventId,
+        opacity: 0.7 + Math.random() * 0.25,
         age: 0,
-        maxAge: 48 + Math.random() * 16,
+        maxAge: 56 + Math.random() * 18,
       })
     }
+
+    const emitFlChannel = (kind: "fl1" | "fl2", count: number) => {
+      for (let i = 0; i < count; i++) {
+        const spd = 4.8 + Math.random() * 1.6
+        const ang = dichroicAng + (Math.random() - 0.5) * 2 * FL_CONE_HALF
+        photons.current.push({
+          id: mkid(),
+          x: ix + (Math.random() - 0.5) * 1.0,
+          y: iy + (Math.random() - 0.5) * 1.0,
+          vx: Math.cos(ang) * spd,
+          vy: Math.sin(ang) * spd,
+          kind,
+          phase: "toDichroic",
+          eventId,
+          opacity: 0.74 + Math.random() * 0.2,
+          age: 0,
+          maxAge: 64 + Math.random() * 18,
+        })
+      }
+    }
+
+    if (cell.emitFl1) emitFlChannel("fl1", PHOTON_FL_COUNT)
+    if (cell.emitFl2) emitFlChannel("fl2", PHOTON_FL_COUNT)
   }, [])
 
   useEffect(() => {
@@ -1216,12 +1687,19 @@ export function FluorescenceDetection() {
       ) {
         scattering = true
         scatterAge = 0
-        emitPhotons(c.cx, LASER_Y, c.population)
+        const eventId = mkid()
+        emitPhotons(c, eventId)
         pending.current.push({
-          id: mkid(),
-          fsc: c.fscPlot,
-          ssc: c.sscPlot,
-          releaseFrame: f + ACQUISITION_DELAY,
+          eventId,
+          cd4: c.cd4Plot,
+          cd8: c.cd8Plot,
+          quadrant: c.plotQuadrant,
+          needsFl1: c.emitFl1,
+          needsFl2: c.emitFl2,
+          fscHit: false,
+          fl1Hit: false,
+          fl2Hit: false,
+          releaseFrame: null,
         })
       }
       if (scattering) {
@@ -1235,28 +1713,41 @@ export function FluorescenceDetection() {
     }).filter(c => c.y < SVG_H + 45)
 
     for (const m of pending.current) {
-      if (f >= m.releaseFrame && rPlot.current) {
-        plotPoints.current.push({ id: m.id, fsc: m.fsc, ssc: m.ssc })
+      if (m.releaseFrame !== null && f >= m.releaseFrame && rPlot.current) {
+        plotPoints.current.push({
+          id: m.eventId,
+          cd4: m.cd4,
+          cd8: m.cd8,
+          quadrant: m.quadrant,
+        })
         if (plotPoints.current.length > MAX_PLOT_POINTS) {
           plotPoints.current.shift()
         }
       }
     }
-    pending.current = pending.current.filter(m => f < m.releaseFrame)
+    pending.current = pending.current.filter(
+      m => m.releaseFrame === null || f < m.releaseFrame,
+    )
 
-    photons.current = photons.current
-      .map(p => {
-        let next: Photon = {
-          ...p,
-          x: p.x + p.vx,
-          y: p.y + p.vy,
-          age: p.age + 1,
-          opacity: p.opacity * (p.phase === "focus" ? 0.978 : 0.965),
-        }
-        next = tryCollectPhoton(next, rFsc.current, rSsc.current)
-        return absorbPhotonIfInside(next)
-      })
-      .filter((p): p is Photon => p !== null && p.age < p.maxAge && p.opacity > 0.02)
+    const nextPhotons: Photon[] = []
+    for (const p of photons.current) {
+      let next: Photon = {
+        ...p,
+        x: p.x + p.vx,
+        y: p.y + p.vy,
+        age: p.age + 1,
+        opacity: p.opacity * (p.phase === "focus" ? 0.978 : 0.968),
+      }
+      next = routePhoton(next, rFsc.current, rFl1.current, rFl2.current)
+      const { photon: absorbed, detected } = absorbPhotonIfInside(next)
+      if (detected) {
+        pending.current = applyDetectorHit(pending.current, p.eventId, p.kind, f)
+      }
+      if (absorbed && absorbed.age < absorbed.maxAge && absorbed.opacity > 0.02) {
+        nextPhotons.push(absorbed)
+      }
+    }
+    photons.current = nextPhotons
 
     if (rShowPerfStats.current) {
       perfFrameCount.current++
@@ -1299,7 +1790,7 @@ export function FluorescenceDetection() {
           <div className="flex flex-col gap-5">
             <ControlRow
               label="Cells" sublabel="Fluidics / Sample"
-              enabled={cellsOn} onChange={setCellsOn}
+              enabled={cellsOn} onChange={handleCellsChange}
               color="oklch(0.66 0.13 215)"/>
             <ControlRow
               label="Laser 488nm" sublabel="Coherent Sapphire"
@@ -1341,7 +1832,7 @@ export function FluorescenceDetection() {
               <div className="flex flex-col gap-2.5">
                 <PopulationRow
                   label="Lymphocytes"
-                  enabled={lymphOn} onChange={setLymphOn}
+                  enabled={lymphOn} onChange={handleLymphChange}
                   color={POPULATION_CONFIG.lymphocyte.color}/>
                 <PopulationRow
                   label="Monocytes"
@@ -1382,6 +1873,7 @@ export function FluorescenceDetection() {
         {/* SVG Scene */}
         <div className="relative flex-1 min-h-0">
           <svg
+            ref={svgRef}
             viewBox={`0 0 ${SVG_W} ${SVG_H}`}
             preserveAspectRatio="xMidYMid meet"
             className="absolute inset-0 h-full w-full">
@@ -1391,7 +1883,12 @@ export function FluorescenceDetection() {
               fscOn={fscOn}
               fl1On={fl1On}
               fl2On={fl2On}
-              performanceMode={performanceMode}/>
+              performanceMode={performanceMode}
+              staining={staining}
+              onResetStaining={resetStaining}
+              draggingAb={draggingAb}
+              onAbPointerDown={handleAbPointerDown}
+            />
             <DynamicLayer
               laserOn={laserOn}
               cellsOn={cellsOn}
@@ -1400,6 +1897,8 @@ export function FluorescenceDetection() {
               cells={cells.current}
               photons={photons.current}
               plotPoints={plotPoints.current}
+              draggingAb={draggingAb}
+              dragOffset={dragOffset}
             />
           </svg>
 
